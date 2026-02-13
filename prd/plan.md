@@ -10,8 +10,9 @@
 
 ### 1. 系统架构
 - **桌面应用框架**：Tauri 2.x
-- **前端技术栈**：Vue 3 + TypeScript + Vite + Pinia
-- **UI 组件库**：Element Plus
+- **前端技术栈**：Nuxt 3.18+ + TypeScript
+- **UI 组件库**：Nuxt UI 3.x (基于 Reka UI 和 Tailwind CSS)
+- **状态管理**：Pinia (Nuxt 内置)
 - **数据库**：SQLite
 - **AI 集成**：OpenAI SDK（支持兼容接口）
 
@@ -484,17 +485,21 @@ listen('processing-progress', (event) => {
 
 ### Phase 1：项目初始化（第 1 天）
 
-1. 创建 Tauri 项目
+1. 创建 Nuxt 项目
    ```bash
-   npm create tauri-app@latest
-   # 选择 Vue + TypeScript
+   npx nuxi@latest init
    ```
 
 2. 安装依赖
    ```bash
-   # 前端依赖
-   npm install vue-router pinia element-plus
-   npm install @element-plus/icons-vue
+   # 安装 Tauri CLI
+   npm install --save-dev @tauri-apps/cli
+
+   # 初始化 Tauri
+   npm run tauri init
+
+   # 安装 Nuxt UI
+   npm install @nuxt/ui
 
    # Rust 依赖（在 src-tauri/Cargo.toml 中添加）
    # - calamine（Excel 解析）

@@ -19,10 +19,17 @@
 
 ## 技术栈
 
-**前端**: Vue 3 + TypeScript + Vite + Pinia + Element Plus
+**前端**: Nuxt 3.18+ + TypeScript + Nuxt UI 3.x
 **桌面框架**: Tauri 2.x (Rust 后端)
 **数据库**: SQLite 3.40+
 **AI 集成**: OpenAI 兼容 API（支持 GPT-4、Claude、通过 Ollama 的本地模型）
+
+**前端特性**：
+- Nuxt 3.18+ - 最新稳定版，全栈 Vue 框架
+- Nuxt UI 3.x - 基于 Reka UI 和 Tailwind CSS 的直观 UI 库
+- 自动路由 - 基于文件系统的路由
+- 内置 Pinia - 状态管理
+- TypeScript 支持 - 完整的类型安全
 
 **关键 Rust 依赖**：
 - `calamine` - Excel 文件解析
@@ -99,11 +106,17 @@ listen('processing-progress', (event) => {
 ### 初始设置
 
 ```bash
-# 创建 Tauri 项目（如果尚未完成）
-npm create tauri-app@latest
+# 创建 Nuxt 项目
+npx nuxi@latest init
 
-# 安装前端依赖
-npm install vue-router pinia element-plus @element-plus/icons-vue
+# 安装 Tauri CLI
+npm install --save-dev @tauri-apps/cli
+
+# 初始化 Tauri
+npm run tauri init
+
+# 安装 Nuxt UI
+npm install @nuxt/ui
 
 # 安装 Rust 依赖（添加到 src-tauri/Cargo.toml）
 # calamine, rusqlite, reqwest, serde, serde_json, tokio, uuid, chrono

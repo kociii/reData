@@ -3,13 +3,14 @@
 ## 1. 技术栈
 
 ### 1.1 前端技术栈
-- **框架**: Vue 3.4+
+- **框架**: Nuxt 3.18+ (最新稳定版)
 - **语言**: TypeScript 5.0+
-- **构建工具**: Vite 5.0+
-- **UI 组件库**: Element Plus 2.5+
-- **状态管理**: Pinia 2.1+
-- **路由**: Vue Router 4.2+
-- **图标**: @element-plus/icons-vue
+- **UI 组件库**: Nuxt UI 3.x (基于 Reka UI 和 Tailwind CSS)
+- **状态管理**: Pinia 2.1+ (Nuxt 内置支持)
+- **路由**: Nuxt Router (自动路由，基于文件系统)
+- **构建工具**: Vite 5.0+ (Nuxt 内置)
+- **图标**: Nuxt UI Icons (基于 Iconify)
+- **CSS 框架**: Tailwind CSS 3.x (Nuxt UI 内置)
 
 ### 1.2 桌面应用框架
 - **框架**: Tauri 2.x
