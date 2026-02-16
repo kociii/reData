@@ -1,10 +1,17 @@
-# 智能表格数据提取系统 - 实施计划
+# 智能数据处理平台 - 实施计划
 
 ## Context（项目背景）
 
-本项目旨在解决大规模本地表格数据的结构化提取问题。用户拥有数百万条存储在 Excel 文件中的非结构化数据，这些表格格式不统一（表头位置不固定、有无表头不确定、多 Sheet 等），需要通过 AI 大模型智能识别表头并提取关键字段（姓名、手机号、公司、地区）。
+本项目旨在构建一个灵活的智能数据处理平台，解决不同业务场景下的表格数据结构化提取问题。用户拥有数百万条存储在 Excel 文件中的非结构化数据，这些数据来源多样、格式不统一（表头位置不固定、有无表头不确定、多 Sheet 等），且不同业务场景需要提取不同的字段。
 
-系统将构建为本地桌面应用，使用 Tauri 框架，提供可视化的处理界面和结果查询界面，支持并行处理多个文件，实时展示处理进度，并将提取结果存储在本地 SQLite 数据库中。
+**核心特点**：
+- **多项目管理**：用户可以创建不同的项目，每个项目独立管理数据和配置
+- **灵活的字段定义**：使用类 Excel 的表格编辑器，轻松定义需要提取的字段
+- **AI 驱动提取**：通过 AI 大模型智能识别表头并提取自定义字段
+- **可配置去重**：每个项目可以设置是否去重，以及按哪些字段去重
+- **简单易用**：面向普通人设计，无需编程或复杂配置
+
+系统将构建为本地桌面应用，使用 Tauri 框架，提供可视化的项目管理、字段定义、处理界面和结果查询界面，支持并行处理多个文件，实时展示处理进度，并将提取结果存储在本地 SQLite 数据库中。
 
 ## 核心需求总结
 
@@ -13,17 +20,24 @@
 - **前端技术栈**：Nuxt 3.18+ + TypeScript
 - **UI 组件库**：Nuxt UI 3.x (基于 Reka UI 和 Tailwind CSS)
 - **状态管理**：Pinia (Nuxt 内置)
-- **数据库**：SQLite
+- **数据库**：SQLite 3.40+
 - **AI 集成**：OpenAI SDK（支持兼容接口）
 
-### 2. 两个主要界面
+### 2. 主要界面
 
-#### 结果页面
-- 展示所有提取的数据（姓名、手机号、公司、地区）
-- 支持编辑功能（直接修改字段值）
-- 支持导出功能（Excel/CSV）
-- 支持筛选和搜索（按来源文件、日期、地区等）
-- 分页展示
+#### 项目管理页面
+- 项目列表展示（卡片式）
+- 项目创建/编辑/删除
+- 项目切换
+- 项目模板选择（默认模板：客户信息提取）
+- 项目配置导入/导出
+
+#### 字段定义页面
+- 类 Excel 表格编辑器
+- 字段属性配置（字段名、显示名、类型、必填、验证规则、AI 提示）
+- 字段拖拽排序
+- 去重配置（启用/禁用、去重字段、去重策略）
+- Prompt 预览
 
 #### 处理界面
 - **布局**：左右分栏
@@ -32,8 +46,9 @@
     - 支持选择查看详情
   - **右侧**：选中文件的详细处理过程
     - **左侧区域**：整个 Sheet 的预览（表格形式）
-    - **右侧区域**：当前正在处理的行的提取结果
+    - **右侧区域**：当前正在处理的行的提取结果（根据项目字段动态显示）
 - **功能**：
+  - 显示当前项目名称和提取字段
   - 选择文件夹或文件进行处理
   - 支持并行处理多个文件
   - 暂停/恢复处理
@@ -44,30 +59,46 @@
   - 成功/失败统计
   - 处理速度（行/分钟）
 
+#### 结果页面
+- 展示当前项目的所有数据（动态列，根据项目字段定义）
+- 支持编辑功能（直接修改字段值）
+- 支持导出功能（Excel/CSV）
+- 支持筛选和搜索（按来源文件、批次、日期等）
+- 分页展示
+
+#### 设置页面
+- AI 配置管理
+- 系统设置
+
 ### 3. 核心处理流程
 
-1. **文件导入**：
+1. **项目选择**：
+   - 用户选择或创建项目
+   - 系统加载项目的字段定义和去重配置
+
+2. **文件导入**：
    - 用户选择文件夹或文件
    - 系统复制文件到 `history/batch_XXX/` 目录（批次号递增）
    - 原文件保持不变
 
-2. **表头识别**（完全自动）：
+3. **表头识别**（完全自动）：
    - 读取每个 Sheet 的前 5 行
    - 提交给 AI 模型识别表头所在行号
    - 缓存表头信息用于后续提取
 
-3. **数据提取**：
+4. **数据提取**：
+   - 根据项目字段定义动态生成 AI Prompt
    - 逐行读取数据
-   - 组装「表头:值」格式
-   - 提交给 AI 模型提取目标字段
+   - 组装「表头:值」格式（有表头）或原始数据（无表头）
+   - 提交给 AI 模型提取项目定义的字段
    - 连续 10 个空行则跳过当前 Sheet
 
-4. **数据存储**：
-   - 按手机号实时自动去重
-   - 存储到 SQLite 数据库
-   - 记录原始内容、来源文件、来源 Sheet
+5. **数据存储**：
+   - 根据项目去重配置处理重复数据
+   - 存储到 SQLite 数据库（JSON 字段存储动态字段）
+   - 记录原始内容、来源文件、来源 Sheet、批次号
 
-5. **失败处理**：
+6. **失败处理**：
    - 记录错误信息
    - 继续处理下一行
    - 最后展示失败统计
@@ -235,71 +266,140 @@ reData/
 ### 表结构
 
 ```sql
--- 提取的数据记录表
-CREATE TABLE extracted_records (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    name TEXT,                          -- 姓名
-    phone TEXT UNIQUE,                  -- 手机号（唯一，用于去重）
-    company TEXT,                       -- 公司
-    region TEXT,                        -- 地区
-    raw_content TEXT,                   -- 原始内容
-    source_file TEXT,                   -- 来源文件路径
-    source_sheet TEXT,                  -- 来源 Sheet 名称
-    row_number INTEGER,                 -- 行号
-    batch_number TEXT,                  -- 批次号
-    status TEXT DEFAULT 'success',      -- 状态：success/failed
-    error_message TEXT,                 -- 错误信息（如果失败）
+-- 项目表
+CREATE TABLE projects (\n    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL UNIQUE,              -- 项目名称
+    description TEXT,                        -- 项目描述
+    is_active INTEGER DEFAULT 1,            -- 是否激活（0/1）
+    dedup_enabled INTEGER DEFAULT 1,        -- 是否启用去重（0/1）
+    dedup_fields TEXT,                      -- 去重字段（JSON数组，如 ["phone", "email"]）
+    dedup_strategy TEXT DEFAULT 'skip',     -- 去重策略：skip/update/keep_both
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
+-- 项目字段定义表
+CREATE TABLE project_fields (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    project_id INTEGER NOT NULL,            -- 关联项目ID
+    field_name TEXT NOT NULL,               -- 字段名称（如：name, phone）
+    field_label TEXT NOT NULL,              -- 字段显示名称（如：姓名、手机号）
+    field_type TEXT NOT NULL,               -- 字段类型：text/number/email/phone/date/url
+    is_required INTEGER DEFAULT 0,          -- 是否必填（0/1）
+    validation_rule TEXT,                   -- 验证规则（正则表达式）
+    extraction_hint TEXT,                   -- AI提取提示
+    display_order INTEGER DEFAULT 0,        -- 显示顺序
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
+    UNIQUE(project_id, field_name)
+);
+
+-- 提取的数据记录表（支持动态字段）
+CREATE TABLE extracted_records (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    project_id INTEGER NOT NULL,            -- 关联项目ID
+    field_data TEXT NOT NULL,               -- JSON格式存储所有字段数据
+    raw_content TEXT,                       -- 原始内容
+    source_file TEXT,                       -- 来源文件路径
+    source_sheet TEXT,                      -- 来源 Sheet 名称
+    row_number INTEGER,                     -- 行号
+    batch_number TEXT,                      -- 批次号
+    status TEXT DEFAULT 'success',          -- 状态：success/failed/duplicate
+    error_message TEXT,                     -- 错误信息（如果失败）
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+);
+
 -- 处理任务表
 CREATE TABLE processing_tasks (
-    id TEXT PRIMARY KEY,                -- 任务 ID（UUID）
-    batch_number TEXT,                  -- 批次号
-    file_path TEXT,                     -- 文件路径
-    total_sheets INTEGER,               -- 总 Sheet 数
-    processed_sheets INTEGER DEFAULT 0, -- 已处理 Sheet 数
-    total_rows INTEGER,                 -- 总行数
-    processed_rows INTEGER DEFAULT 0,   -- 已处理行数
-    success_count INTEGER DEFAULT 0,    -- 成功数量
-    failed_count INTEGER DEFAULT 0,     -- 失败数量
-    status TEXT DEFAULT 'pending',      -- 状态：pending/processing/paused/completed/cancelled
-    config_id INTEGER,                  -- 使用的 AI 配置 ID
+    id TEXT PRIMARY KEY,                    -- 任务 ID（UUID）
+    project_id INTEGER NOT NULL,            -- 关联项目ID
+    batch_number TEXT,                      -- 批次号
+    file_path TEXT,                         -- 文件路径
+    total_sheets INTEGER,                   -- 总 Sheet 数
+    processed_sheets INTEGER DEFAULT 0,     -- 已处理 Sheet 数
+    total_rows INTEGER,                     -- 总行数
+    processed_rows INTEGER DEFAULT 0,       -- 已处理行数
+    success_count INTEGER DEFAULT 0,        -- 成功数量
+    failed_count INTEGER DEFAULT 0,         -- 失败数量
+    status TEXT DEFAULT 'pending',          -- 状态：pending/processing/paused/completed/cancelled
+    config_id INTEGER,                      -- 使用的 AI 配置 ID
     started_at DATETIME,
     completed_at DATETIME,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
 );
 
 -- AI 配置表
 CREATE TABLE ai_configs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    name TEXT NOT NULL,                 -- 配置名称
-    api_url TEXT NOT NULL,              -- API URL
-    model_name TEXT NOT NULL,           -- 模型名称
-    api_key TEXT NOT NULL,              -- API Key
-    temperature REAL DEFAULT 0.7,       -- 温度
-    max_tokens INTEGER DEFAULT 1000,    -- 最大 Token
-    is_default INTEGER DEFAULT 0,       -- 是否默认配置
+    name TEXT NOT NULL,                     -- 配置名称
+    api_url TEXT NOT NULL,                  -- API URL
+    model_name TEXT NOT NULL,               -- 模型名称
+    api_key TEXT NOT NULL,                  -- API Key（加密存储）
+    temperature REAL DEFAULT 0.7,           -- 温度
+    max_tokens INTEGER DEFAULT 1000,        -- 最大 Token
+    is_default INTEGER DEFAULT 0,           -- 是否默认配置
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
 -- 批次表
 CREATE TABLE batches (
-    batch_number TEXT PRIMARY KEY,      -- 批次号（batch_001）
-    file_count INTEGER DEFAULT 0,       -- 文件数量
-    total_records INTEGER DEFAULT 0,    -- 总记录数
-    success_count INTEGER DEFAULT 0,    -- 成功数量
-    failed_count INTEGER DEFAULT 0,     -- 失败数量
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    batch_number TEXT PRIMARY KEY,          -- 批次号（batch_001）
+    project_id INTEGER NOT NULL,            -- 关联项目ID
+    file_count INTEGER DEFAULT 0,           -- 文件数量
+    total_records INTEGER DEFAULT 0,        -- 总记录数
+    success_count INTEGER DEFAULT 0,        -- 成功数量
+    failed_count INTEGER DEFAULT 0,         -- 失败数量
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
 );
 
 -- 索引
-CREATE INDEX idx_phone ON extracted_records(phone);
-CREATE INDEX idx_batch ON extracted_records(batch_number);
+CREATE INDEX idx_records_project ON extracted_records(project_id);
+CREATE INDEX idx_records_batch ON extracted_records(batch_number);
+CREATE INDEX idx_records_status ON extracted_records(status);
+CREATE INDEX idx_project_fields_project ON project_fields(project_id);
+CREATE INDEX idx_project_fields_order ON project_fields(project_id, display_order);
+CREATE INDEX idx_task_project ON processing_tasks(project_id);
 CREATE INDEX idx_task_status ON processing_tasks(status);
+CREATE INDEX idx_batch_project ON batches(project_id);
 CREATE INDEX idx_config_default ON ai_configs(is_default);
+
+-- 动态去重索引（在项目创建时根据去重字段动态创建）
+-- 示例：CREATE INDEX idx_dedup_p1_phone ON extracted_records(project_id, json_extract(field_data, '$.phone')) WHERE project_id = 1;
+```
+
+### field_data JSON 结构示例
+
+```json
+{
+  "name": "张三",
+  "phone": "13800138000",
+  "company": "XX科技公司",
+  "region": "北京市",
+  "email": "zhangsan@example.com"
+}
+```
+
+### 默认项目模板
+
+系统初始化时自动创建默认项目模板：
+
+```sql
+-- 插入默认项目
+INSERT INTO projects (name, description, dedup_enabled, dedup_fields, dedup_strategy)
+VALUES ('客户信息提取', '提取客户姓名、手机号、公司、地区、邮箱', 1, '["phone"]', 'skip');
+
+-- 插入默认字段定义
+INSERT INTO project_fields (project_id, field_name, field_label, field_type, is_required, validation_rule, extraction_hint, display_order) VALUES
+(1, 'name', '姓名', 'text', 1, '', '支持中文、英文、带称呼（如李先生、王总）', 1),
+(1, 'phone', '手机号', 'phone', 1, '^1[3-9]\\d{9}$', '11位数字手机号', 2),
+(1, 'company', '公司', 'text', 0, '', '完整公司名称', 3),
+(1, 'region', '地区', 'text', 0, '', '省/市级别，可从地址提取或从公司名推演', 4),
+(1, 'email', '邮箱', 'email', 0, '', '标准邮箱格式', 5);
 ```
 
 ## 核心处理流程详细设计
