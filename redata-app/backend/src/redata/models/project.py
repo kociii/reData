@@ -32,13 +32,14 @@ class Project(Base):
 
 class ProjectField(Base):
     __tablename__ = "project_fields"
-    
+
     id = Column(Integer, primary_key=True, index=True)
     project_id = Column(Integer, nullable=False, index=True)
     field_name = Column(String, nullable=False)
     field_label = Column(String, nullable=False)
     field_type = Column(String, nullable=False)  # text, number, email, phone, date, url
     is_required = Column(Boolean, default=False)
+    additional_requirement = Column(Text, nullable=True)
     validation_rule = Column(Text, nullable=True)
     extraction_hint = Column(Text, nullable=True)
     display_order = Column(Integer, default=0)

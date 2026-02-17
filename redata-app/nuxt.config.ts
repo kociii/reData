@@ -3,16 +3,12 @@ export default defineNuxtConfig({
   compatibilityDate: '2024-11-01',
   devtools: { enabled: false }, // 禁用 devtools 避免 fork 问题
   modules: ['@nuxt/ui', '@pinia/nuxt'],
+  css: ['~/assets/css/main.css'],
   ssr: false, // Tauri 需要 SPA 模式
 
-  // Nuxt UI 配置 - 使用国内字体镜像
+  // Nuxt UI 配置 - 禁用自动字体加载（使用国内镜像）
   ui: {
-    fonts: {
-      fallbacks: false,
-      families: [
-        { name: 'Inter', weights: ['400', '500', '600', '700'] },
-      ],
-    },
+    fonts: false, // 完全禁用内置字体功能
   },
 
   // 自定义 head 配置 - 使用国内 Google Fonts 镜像

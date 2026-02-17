@@ -17,6 +17,7 @@ from ..models.project import AiConfig, ProjectField
 class FieldMetadata:
     """AI 生成的字段元数据"""
     field_name: str
+    validation_rule: Optional[str]
     extraction_hint: str
 
 
@@ -94,31 +95,43 @@ class AIClient:
     async def generate_field_metadata(
         self,
         field_label: str,
-        field_type: str
+        field_type: str,
+        additional_requirement: Optional[str] = None
     ) -> FieldMetadata:
         """
-        生成字段元数据（英文名和提取提示）
+        生成字段元数据（英文名、验证规则和提取提示）
 
         Args:
             field_label: 字段标签（中文）
             field_type: 字段类型
+            additional_requirement: 补充提取要求（可选）
 
         Returns:
             FieldMetadata 对象
         """
+        additional_text = f"\n- 补充要求：{additional_requirement}" if additional_requirement else ""
+
         prompt = f"""你是一个数据建模专家。用户正在创建一个数据提取字段，请帮助生成字段的元数据。
 
 字段信息：
 - 字段标签（中文）：{field_label}
-- 字段类型：{field_type}
+- 字段类型：{field_type}{additional_text}
 
 请生成以下内容：
 1. 标准的英文字段名（遵循 snake_case 命名规范，如 phone_number, company_name）
-2. 数据提取提示（简洁描述如何识别和提取这个字段，用于指导 AI 提取数据）
+2. 验证规则（根据字段类型生成正则表达式或验证规则，如果不需要验证则返回 null）
+   - phone: 中国手机号 11 位，以 1 开头
+   - email: 标准邮箱格式
+   - url: 以 http:// 或 https:// 开头
+   - date: 日期格式 YYYY-MM-DD 或 YYYY/MM/DD
+   - number: 数字格式
+   - text: 不需要验证，返回 null
+3. 数据提取提示（简洁描述如何识别和提取这个字段，用于指导 AI 提取数据）
 
 请以 JSON 格式返回：
 {{
   "field_name": "生成的英文字段名",
+  "validation_rule": "验证规则或 null",
   "extraction_hint": "提取提示说明"
 }}
 
@@ -132,6 +145,7 @@ class AIClient:
             data = json.loads(json_str)
             return FieldMetadata(
                 field_name=data.get("field_name", ""),
+                validation_rule=data.get("validation_rule"),
                 extraction_hint=data.get("extraction_hint", "")
             )
         except json.JSONDecodeError as e:

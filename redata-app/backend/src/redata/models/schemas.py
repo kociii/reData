@@ -32,6 +32,7 @@ class ProjectFieldBase(BaseModel):
     field_label: str
     field_type: str
     is_required: bool = False
+    additional_requirement: Optional[str] = None
     validation_rule: Optional[str] = None
     extraction_hint: Optional[str] = None
     display_order: int = 0
@@ -100,6 +101,18 @@ class AiConfigResponse(AiConfigBase):
     id: int
     created_at: datetime
     updated_at: Optional[datetime] = None
-    
+
     class Config:
         from_attributes = True
+
+# ========== Field Metadata Generation Schemas ==========
+
+class GenerateFieldMetadataRequest(BaseModel):
+    field_label: str
+    field_type: str
+    additional_requirement: Optional[str] = None
+
+class GenerateFieldMetadataResponse(BaseModel):
+    field_name: str
+    validation_rule: Optional[str] = None
+    extraction_hint: str

@@ -6,13 +6,14 @@
 |------|------|------|--------|----------|----------|------|
 | Phase 1 | 项目初始化 | ✅ 已完成 | - | 1天 | 1天 | Nuxt 4 + Tauri 2 + Nuxt UI 4 |
 | Phase 2 | 数据库和基础服务 | ✅ 已完成 | - | 2-3天 | 2天 | Python FastAPI + SQLAlchemy |
-| Phase 3 | AI 集成和 Excel 解析 | ✅ 已完成 | - | 2天 | 1天 | AI 客户端、Excel 解析、存储服务 |
-| Phase 4 | Tauri Commands | ⬜ 未开始 | - | 1天 | - | 前后端通信接口 |
-| Phase 5 | 前端 - 项目管理 | ⬜ 未开始 | - | 2天 | - | 项目列表、创建、切换 |
-| Phase 6 | 前端 - 字段定义 | ⬜ 未开始 | - | 2天 | - | 类 Excel 编辑器 |
-| Phase 7 | 前端 - 处理界面 | ⬜ 未开始 | - | 3天 | - | 文件处理、进度显示 |
-| Phase 8 | 前端 - 结果页面 | ⬜ 未开始 | - | 2天 | - | 数据展示、编辑、导出 |
-| Phase 9 | 测试和优化 | ⬜ 未开始 | - | 2天 | - | 功能测试、性能优化 |
+| Phase 3 | AI 集成和 Excel 解析 | ✅ 已完成 | - | 2天 | 1天 | 两阶段处理方案 |
+| Phase 4 | 前端基础架构 | ✅ 已完成 | - | 1天 | 0.5天 | 布局、API 客户端、状态管理 |
+| Phase 5 | 前端 - 项目管理 | ✅ 已完成 | - | 2天 | 0.5天 | 项目列表、创建、切换 |
+| Phase 6 | 前端 - 字段定义 | ✅ 已完成 | - | 2天 | 1天 | AI 辅助字段生成工作流 |
+| Phase 7 | 前端 - 处理界面 | ✅ 已完成 | - | 3天 | 0.5天 | 文件处理、进度显示 |
+| Phase 8 | 前端 - 结果页面 | ✅ 已完成 | - | 2天 | 0.5天 | 数据展示、编辑、导出 |
+| Phase 9 | UI 优化 | ✅ 已完成 | - | 1天 | 1天 | 全局标签页、卡片布局、固定表头 |
+| Phase 10 | 后端 API 集成 | ✅ 已完成 | - | 1天 | 0.5天 | AI 字段生成接口 |
 
 **状态说明**：
 - ⬜ 未开始
@@ -21,7 +22,12 @@
 - ⚠️ 有问题
 - 🔴 已阻塞
 
-**总进度**：3/9 (33%)
+**总进度**：10/10 (100%)
+
+**架构说明**：
+- 后端: Python FastAPI (http://127.0.0.1:8000)
+- 前端通过 HTTP API 与后端通信
+- Tauri 主要用于桌面壳和文件系统访问
 
 ## 已完成工作详情
 
@@ -139,21 +145,201 @@
 
 ## 下一步开发计划
 
-### Phase 4: Tauri Commands (下一步)
+### Phase 10: 后端 API 集成 (进行中)
 
 **预计工期**: 1天
 
 **任务清单**:
-- [ ] 配置 Tauri 启动 FastAPI 后端
-- [ ] 实现文件选择命令
-- [ ] 实现进程间通信
-- [ ] 处理窗口生命周期
+- [ ] 实现 AI 字段生成接口
+  - 接收：field_label, field_type, additional_requirement
+  - 返回：field_name (英文), validation_rule, extraction_hint
+- [ ] 更新字段定义 API
+  - 支持新的字段结构
+  - 集成 AI 生成逻辑
+- [ ] 前端集成 AI 字段生成
+  - 在 `fields.vue` 中调用 AI 接口
+  - 显示生成进度
+  - 处理生成错误
 
-### Phase 5-8: 前端界面开发
+### Phase 11: 测试和打包
 
-**预计工期**: 9天
+**预计工期**: 2天
 
-按 prd.md 和 design.md 的设计实现前端界面
+**任务清单**:
+- [ ] 功能测试（各种表格格式、并行处理、暂停/恢复、去重）
+- [ ] 性能优化（AI 调用频率、数据库批量插入、前端渲染）
+- [ ] 错误处理完善
+- [ ] 配置打包选项
+- [ ] 打包应用
+- [ ] 测试安装包
+
+## Phase 4-8: 前端开发完成详情
+
+### Phase 4: 前端基础架构 ✅
+
+**完成时间**: 2026-02-17
+
+**已完成任务**:
+- [x] 创建 TypeScript 类型定义 (`app/types/index.ts`)
+- [x] 创建 API 客户端 (`app/utils/api.ts`)
+- [x] 创建 Pinia Stores:
+  - `project.ts` - 项目状态管理
+  - `field.ts` - 字段状态管理
+  - `config.ts` - AI 配置状态管理
+  - `processing.ts` - 处理任务状态管理
+  - `result.ts` - 结果数据状态管理
+- [x] 创建应用布局 (`app/layouts/default.vue`)
+
+### Phase 5: 前端 - 项目管理 ✅
+
+**完成时间**: 2026-02-17
+
+**已完成任务**:
+- [x] 实现项目列表页 (`app/pages/index.vue`)
+  - 项目卡片展示
+  - 创建项目对话框
+  - 删除确认对话框
+  - 加载和空状态
+- [x] 实现项目详情页 (`app/pages/project/[id].vue`)
+  - 项目信息展示
+  - 统计卡片
+  - 功能标签页
+  - 文件上传对话框
+
+### Phase 6: 前端 - 字段定义 ✅
+
+**完成时间**: 2026-02-17
+
+**已完成任务**:
+- [x] 实现字段定义页 (`app/pages/project/[id]/fields.vue`)
+  - 模态框编辑模式（替代内联编辑）
+  - 用户输入：字段名称、字段类型、补充提取要求
+  - AI 生成：字段名(英文)、验证规则、提取提示
+  - 字段添加/编辑/删除
+  - 字段类型选择
+  - 必填字段配置
+
+### Phase 7: 前端 - 处理界面 ✅
+
+**完成时间**: 2026-02-17
+
+**已完成任务**:
+- [x] 实现处理页面 (`app/pages/project/[id]/processing.vue`)
+  - 任务列表展示
+  - 进度条显示
+  - 暂停/恢复/取消功能
+  - 实时日志显示
+  - 状态图标和颜色
+
+### Phase 8: 前端 - 结果页面 ✅
+
+**完成时间**: 2026-02-17
+
+**已完成任务**:
+- [x] 实现结果页面 (`app/pages/project/[id]/results.vue`)
+  - 动态列数据表格
+  - 分页功能
+  - 搜索功能
+  - 行内编辑功能
+  - 导出对话框
+- [x] 实现设置页面 (`app/pages/settings.vue`)
+  - AI 配置管理
+  - 测试连接
+  - 设为默认
+  - 应用设置
+
+**新增前端文件**:
+- `app/types/index.ts` - TypeScript 类型定义
+- `app/utils/api.ts` - API 客户端
+- `app/stores/project.ts` - 项目状态管理
+- `app/stores/field.ts` - 字段状态管理
+- `app/stores/config.ts` - 配置状态管理
+- `app/stores/processing.ts` - 处理状态管理
+- `app/stores/result.ts` - 结果状态管理
+- `app/stores/tab.ts` - 标签页状态管理
+- `app/layouts/default.vue` - 应用布局
+- `app/pages/index.vue` - 项目列表页
+- `app/pages/project/[id].vue` - 项目详情页
+- `app/pages/project/[id]/fields.vue` - 字段定义页
+- `app/pages/project/[id]/processing.vue` - 处理页面
+- `app/pages/project/[id]/results.vue` - 结果页面
+- `app/pages/settings.vue` - 设置页面
+- `app/components/ProgressBar.vue` - 进度条组件
+
+### Phase 9: UI 优化 ✅
+
+**完成时间**: 2026-02-17
+
+**已完成任务**:
+- [x] 实现全局标签页功能
+  - 创建 `app/stores/tab.ts` 标签页状态管理
+  - 修改 `app/layouts/default.vue` 添加全局标签栏
+  - "项目列表"固定为第一个不可关闭标签
+  - 项目标签可以打开/关闭/切换
+  - 设置页面作为独立标签打开
+- [x] 优化项目卡片布局
+  - 移除卡片信息字段显示
+  - 按钮收起为下拉菜单
+  - 卡片可点击直接打开项目
+  - 弹性网格布局 `grid-cols-[repeat(auto-fill,minmax(280px,1fr))]`
+  - 简化"新建项目"卡片为横向布局
+- [x] 优化结果页面
+  - 固定表头 `sticky top-0`
+  - 默认每页 50 条数据
+  - 无数据时也显示表头
+  - 修复分页组件使用
+- [x] 优化设置页面
+  - AI 配置字段改为普通输入框
+  - 改善表单间距 `space-y-5`
+  - 设置作为独立标签打开
+
+### Phase 10: 后端 API 集成 ✅
+
+**完成时间**: 2026-02-17
+
+**已完成任务**:
+- [x] 添加 `additional_requirement` 字段到数据库模型
+  - 更新 `ProjectField` 模型添加 `additional_requirement` 字段
+  - 执行数据库迁移脚本
+- [x] 更新 Pydantic schemas
+  - 更新 `ProjectFieldBase` 添加 `additional_requirement` 字段
+  - 新增 `GenerateFieldMetadataRequest` 和 `GenerateFieldMetadataResponse` schemas
+- [x] 更新 AI 客户端服务
+  - 更新 `FieldMetadata` 数据类添加 `validation_rule` 字段
+  - 修改 `generate_field_metadata` 方法接收 `additional_requirement` 参数
+  - 优化 AI prompt 生成验证规则
+- [x] 添加字段元数据生成 API 端点
+  - 在 `fields.py` 中添加 `POST /api/fields/generate-metadata` 端点
+  - 集成 AI 客户端生成字段元数据
+- [x] 更新前端类型定义
+  - 更新 `GenerateFieldMetadataRequest` 添加 `additional_requirement`
+  - 更新 `FieldMetadata` 添加 `validation_rule`
+- [x] 前端集成 AI 字段生成功能
+  - 在 `fields.vue` 的 `saveField` 方法中调用 AI 生成接口
+  - 使用 AI 生成的 `field_name`, `validation_rule`, `extraction_hint`
+
+**新增/修改文件**:
+- `backend/src/redata/models/project.py` - 添加 `additional_requirement` 字段
+- `backend/src/redata/models/schemas.py` - 添加新的 schemas
+- `backend/src/redata/services/ai_client.py` - 更新 AI 生成逻辑
+- `backend/src/redata/api/fields.py` - 添加生成接口
+- `backend/migrate_add_additional_requirement.py` - 数据库迁移脚本
+- `app/types/index.ts` - 更新类型定义
+- `app/pages/project/[id]/fields.vue` - 集成 AI 生成
+
+## 下一步开发计划
+
+### Phase 11: 测试和打包
+
+**预计工期**: 2天
+
+**任务清单**:
+- [ ] 功能测试（各种表格格式、并行处理、暂停/恢复、去重）
+- [ ] 性能优化（AI 调用频率、数据库批量插入、前端渲染）
+- [ ] 错误处理完善
+- [ ] 配置打包选项
+- [ ] 打包应用
+- [ ] 测试安装包
 
 ## Context（项目背景）
 
@@ -262,162 +448,6 @@
 - 可配置：API URL、Model 名称、API Key、温度、最大 Token
 - 设置默认配置
 - 处理时自动使用默认配置
-
-## 实施步骤
-
-### Phase 1：项目初始化（第 1 天）
-
-**目标**: 搭建基础开发环境
-
-**任务清单**:
-- [ ] 创建 Nuxt 项目
-- [ ] 安装 Tauri CLI 并初始化
-- [ ] 安装 Nuxt UI
-- [ ] 配置项目结构
-- [ ] 配置路由
-- [ ] 配置 Pinia
-
-**验收标准**: 应用可以正常启动，显示基础界面
-
-**技术参考**: 详见 dev.md 第 11 章
-
-### Phase 2：数据库和基础服务（第 2-3 天）
-
-**目标**: 实现数据库表结构和基础存储服务
-
-**任务清单**:
-- [ ] 实现数据库模块（schema.rs）
-- [ ] 创建所有表结构（projects、project_fields、processing_tasks、ai_configs、batches）
-- [ ] 实现数据模型（project.rs、field.rs、task.rs、config.rs、record.rs）
-- [ ] 实现存储服务（storage.rs）
-- [ ] 实现动态表创建和管理功能
-
-**验收标准**: 数据库表创建成功，基础 CRUD 操作正常
-
-**技术参考**: 详见 dev.md 第 2 章（数据库设计）、第 5.1 章（动态表创建）
-
-### Phase 3：AI 集成和 Excel 解析（第 4-5 天）
-
-**目标**: 实现 AI 客户端和 Excel 解析功能（高效模式）
-
-**任务清单**:
-- [ ] 实现 AI 客户端（ai_client.py）
-- [ ] 集成 OpenAI SDK
-- [ ] 实现字段元数据生成 Prompt
-- [ ] **实现 AI 列映射分析 Prompt**（每 Sheet 仅 1 次）
-- [ ] 实现错误重试机制
-- [ ] 实现 Excel 解析（excel_parser.py）
-- [ ] **实现数据验证器（validator.py）**
-- [ ] 实现数据提取服务（extractor.py）
-
-**验收标准**:
-- AI 可以正确分析列映射关系
-- 本地验证器可以正确验证数据格式
-- Excel 文件可以正常解析和导入
-
-**技术参考**: 详见 dev.md 第 4.2.2 章（Services）、第 6 章（AI Prompt 设计）
-
-### Phase 4：Tauri Commands（第 6 天）
-
-**目标**: 实现前后端通信接口
-
-**任务清单**:
-- [ ] 实现项目管理命令（project.rs）
-- [ ] 实现字段定义命令（field.rs）
-- [ ] 实现文件操作命令（file.rs）
-- [ ] 实现处理命令（processing.rs）
-- [ ] 实现配置命令（config.rs）
-- [ ] 实现结果查询命令（result.rs）
-
-**验收标准**: 前端可以通过 Tauri 命令调用后端功能
-
-**技术参考**: 详见 dev.md 第 4.2.1 章（Tauri Commands）
-
-### Phase 5：前端 - 项目管理（第 7-8 天）
-
-**目标**: 实现项目管理界面
-
-**任务清单**:
-- [ ] 实现项目列表页（ProjectListView.vue）
-- [ ] 实现项目卡片组件（ProjectCard.vue）
-- [ ] 实现项目表单组件（ProjectForm.vue）
-- [ ] 实现项目 Store（project.ts）
-- [ ] 实现项目创建/编辑/删除功能
-- [ ] 实现项目切换功能
-
-**验收标准**: 可以创建、编辑、删除和切换项目
-
-**技术参考**: 详见 design.md 第 2-3 章（项目管理界面）、dev.md 第 4.1.2 章（状态管理）
-
-### Phase 6：前端 - 字段定义（第 9-10 天）
-
-**目标**: 实现字段定义界面
-
-**任务清单**:
-- [ ] 实现字段编辑器组件（FieldEditor.vue）
-- [ ] 实现字段行组件（FieldRow.vue）
-- [ ] 实现字段 Store（field.ts）
-- [ ] 实现字段添加/编辑/删除功能
-- [ ] 实现字段拖拽排序功能
-- [ ] 实现 AI 辅助字段定义（自动生成字段名和提取提示）
-- [ ] 实现去重配置功能
-- [ ] 实现 Prompt 预览功能
-
-**验收标准**: 可以通过类 Excel 编辑器定义字段，AI 可以自动生成字段元数据
-
-**技术参考**: 详见 design.md 第 4 章（字段定义界面）、dev.md 第 6.1 章（字段元数据生成）
-
-### Phase 7：前端 - 处理界面（第 11-13 天）
-
-**目标**: 实现文件处理界面
-
-**任务清单**:
-- [ ] 实现处理界面布局（ProcessingView.vue）
-- [ ] 实现文件列表组件（FileList.vue）
-- [ ] 实现 Sheet 预览组件（SheetPreview.vue）
-- [ ] 实现提取结果组件（ExtractionResult.vue）
-- [ ] 实现进度条组件（ProgressBar.vue）
-- [ ] 实现处理 Store（processing.ts）
-- [ ] 实现文件选择功能
-- [ ] 实现暂停/恢复/取消功能
-- [ ] 实现实时进度更新（监听 Tauri 事件）
-
-**验收标准**: 可以选择文件并处理，实时显示处理进度和提取结果
-
-**技术参考**: 详见 design.md 第 5 章（处理界面）、dev.md 第 5.5 章（实时进度更新）
-
-### Phase 8：前端 - 结果页面（第 14-15 天）
-
-**目标**: 实现结果展示和管理界面
-
-**任务清单**:
-- [ ] 实现结果页面（ResultView.vue）
-- [ ] 实现结果 Store（result.ts）
-- [ ] 实现动态列表（根据项目字段定义）
-- [ ] 实现分页功能
-- [ ] 实现筛选和搜索功能
-- [ ] 实现编辑功能
-- [ ] 实现导出功能（Excel/CSV）
-
-**验收标准**: 可以查看、编辑和导出提取的数据
-
-**技术参考**: 详见 design.md 第 6 章（结果页面）、dev.md 第 4.2.1 章（result.rs）
-
-### Phase 9：测试和优化（第 16-17 天）
-
-**目标**: 完成功能测试和性能优化
-
-**任务清单**:
-- [ ] 功能测试（各种表格格式、并行处理、暂停/恢复、去重）
-- [ ] 性能优化（AI 调用频率、数据库批量插入、前端渲染）
-- [ ] 错误处理完善
-- [ ] 配置打包选项
-- [ ] 打包应用
-- [ ] 测试安装包
-
-**验收标准**: 所有功能正常，性能达标，可以打包发布
-
-**技术参考**: 详见 dev.md 第 7 章（性能优化）、第 9 章（错误处理）、第 12 章（验证和测试）
 
 ## 关键里程碑
 

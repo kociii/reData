@@ -94,6 +94,7 @@
 - `processingStore` - 活动任务、进度、选中的任务
 - `resultStore` - 提取的记录、分页、筛选器
 - `configStore` - AI 配置、默认配置
+- `tabStore` - 全局标签页状态管理
 
 ### 实时进度更新
 
@@ -266,13 +267,15 @@ class Extractor:
 - `app/pages/` - 页面组件（Nuxt 4 自动路由）
   - `index.vue` - 项目列表页（首页）
   - `project/[id].vue` - 项目详情页
-  - `project/[id]/fields.vue` - 字段定义页
+  - `project/[id]/fields.vue` - 字段定义页（AI 辅助字段生成）
   - `project/[id]/processing.vue` - 数据处理页
-  - `project/[id]/results.vue` - 结果展示页
-  - `settings.vue` - 设置页
+  - `project/[id]/results.vue` - 结果展示页（固定表头、50条/页）
+  - `project/[id]/settings.vue` - 项目设置页
+  - `settings.vue` - 设置页（AI 配置管理）
 - `components/` - 可复用组件
 - `stores/` - Pinia stores
 - `types/` - TypeScript 类型定义
+- `utils/` - 工具函数（API 客户端）
 
 ### 后端结构
 
@@ -327,10 +330,10 @@ class Extractor:
 
 ## 文档
 
-`prd/` 目录中的完整文档（v2.3.0）：
+`prd/` 目录中的完整文档（v2.4.0）：
 - `prd.md` - 产品需求和业务逻辑（两阶段处理方案）
 - `design.md` - UI/UX 设计及 ASCII 图表
-- `plan.md` - 实施计划（9 个阶段，当前进度 3/9）
+- `plan.md` - 实施计划（10 个阶段，当前进度 10/10）
 - `dev.md` - 技术细节和架构（两阶段处理实现）
 - `README.md` - 文档索引
 
@@ -338,7 +341,21 @@ class Extractor:
 - ✅ Phase 1: 项目初始化（Nuxt 4 + Tauri 2）
 - ✅ Phase 2: 数据库和基础服务（Python FastAPI）
 - ✅ Phase 3: AI 集成和 Excel 解析（两阶段处理方案）
-- ⬜ Phase 4-9: Tauri Commands、前端界面、测试
+- ✅ Phase 4: 前端基础架构（布局、API 客户端、状态管理）
+- ✅ Phase 5: 前端 - 项目管理（项目列表、创建、切换）
+- ✅ Phase 6: 前端 - 字段定义（AI 辅助字段生成工作流）
+- ✅ Phase 7: 前端 - 处理界面（文件处理、进度显示）
+- ✅ Phase 8: 前端 - 结果页面（数据展示、编辑、导出）
+- ✅ Phase 9: UI 优化（全局标签页、卡片布局、固定表头）
+- ✅ Phase 10: 后端 API 集成（AI 字段生成接口）
+
+**v2.4.0 重要变更**：
+- 完成所有 10 个开发阶段
+- 新增全局标签页功能（浏览器式体验）
+- AI 辅助字段定义：自动生成英文字段名、验证规则、提取提示
+- 优化 UI：项目卡片弹性布局、结果页面固定表头（50条/页）
+- 新增 `tab.ts` 标签页状态管理
+- 数据库新增 `additional_requirement` 字段
 
 **v2.3.0 重要变更**：
 - 采用"AI 列映射分析 + 本地验证导入"的两阶段处理

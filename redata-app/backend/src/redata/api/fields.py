@@ -2,10 +2,48 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from typing import List
 from ..db.base import get_db
-from ..models.project import ProjectField
-from ..models.schemas import ProjectFieldCreate, ProjectFieldUpdate, ProjectFieldResponse
+from ..models.project import ProjectField, AiConfig
+from ..models.schemas import (
+    ProjectFieldCreate,
+    ProjectFieldUpdate,
+    ProjectFieldResponse,
+    GenerateFieldMetadataRequest,
+    GenerateFieldMetadataResponse
+)
+from ..services.ai_client import AIClient
 
 router = APIRouter()
+
+@router.post("/generate-metadata", response_model=GenerateFieldMetadataResponse)
+async def generate_field_metadata(
+    request: GenerateFieldMetadataRequest,
+    db: Session = Depends(get_db)
+):
+    """使用 AI 生成字段元数据"""
+    # 获取默认 AI 配置
+    ai_config = db.query(AiConfig).filter(AiConfig.is_default == True).first()
+    if not ai_config:
+        raise HTTPException(status_code=404, detail="未找到默认 AI 配置")
+
+    # 创建 AI 客户端
+    ai_client = AIClient(ai_config)
+
+    try:
+        # 生成字段元数据
+        metadata = await ai_client.generate_field_metadata(
+            field_label=request.field_label,
+            field_type=request.field_type,
+            additional_requirement=request.additional_requirement
+        )
+
+        return GenerateFieldMetadataResponse(
+            field_name=metadata.field_name,
+            validation_rule=metadata.validation_rule,
+            extraction_hint=metadata.extraction_hint
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"生成字段元数据失败: {str(e)}")
+
 
 @router.post("/", response_model=ProjectFieldResponse)
 def create_field(field: ProjectFieldCreate, db: Session = Depends(get_db)):

@@ -12,24 +12,83 @@ fn greet(name: &str) -> String {
     format!("Hello, {}! You've been greeted from Rust!", name)
 }
 
+// 获取后端目录路径
+fn get_backend_dir() -> std::path::PathBuf {
+    // 尝试多种可能的路径
+    let possible_paths = vec![
+        // 开发模式: redata-app/src-tauri -> redata-app/backend
+        std::env::current_dir()
+            .unwrap()
+            .parent()
+            .map(|p| p.join("backend")),
+        // 从可执行文件目录查找
+        std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|p| p.to_path_buf()))
+            .and_then(|p| p.parent().map(|p| p.join("backend"))),
+        // 当前目录的 backend 子目录
+        Some(std::env::current_dir().unwrap().join("backend")),
+    ];
+
+    for path_opt in possible_paths {
+        if let Some(path) = path_opt {
+            if path.exists() && path.join("run.py").exists() {
+                return path;
+            }
+        }
+    }
+
+    // 默认返回当前目录的 backend 子目录
+    std::env::current_dir().unwrap().join("backend")
+}
+
 // 启动 FastAPI 后端服务器
 fn start_backend_server() -> Result<Child, std::io::Error> {
-    #[cfg(target_os = "windows")]
-    let python_cmd = "python";
+    let backend_dir = get_backend_dir();
 
-    #[cfg(not(target_os = "windows"))]
-    let python_cmd = "python3";
+    // 检查后端目录是否存在
+    if !backend_dir.exists() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::NotFound,
+            format!("后端目录不存在: {:?}", backend_dir),
+        ));
+    }
 
-    // 获取后端目录路径
-    let backend_dir = std::env::current_dir()
-        .unwrap()
-        .join("backend");
+    let run_py = backend_dir.join("run.py");
+    if !run_py.exists() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::NotFound,
+            format!("run.py 不存在: {:?}", run_py),
+        ));
+    }
 
-    // 启动 FastAPI 服务器
-    let child = Command::new(python_cmd)
-        .arg("run.py")
-        .current_dir(backend_dir)
-        .spawn()?;
+    println!("后端目录: {:?}", backend_dir);
+
+    // 优先使用 uv 运行（如果可用）
+    let uv_path = backend_dir.join(".venv");
+    let use_uv = uv_path.exists();
+
+    let child = if use_uv {
+        // 使用 uv run 启动
+        Command::new("uv")
+            .arg("run")
+            .arg("python")
+            .arg("run.py")
+            .current_dir(&backend_dir)
+            .spawn()?
+    } else {
+        // 使用系统 Python
+        #[cfg(target_os = "windows")]
+        let python_cmd = "python";
+
+        #[cfg(not(target_os = "windows"))]
+        let python_cmd = "python3";
+
+        Command::new(python_cmd)
+            .arg("run.py")
+            .current_dir(&backend_dir)
+            .spawn()?
+    };
 
     println!("FastAPI 后端服务器已启动，PID: {}", child.id());
     Ok(child)
@@ -56,6 +115,8 @@ pub fn run() {
         }
         Err(e) => {
             eprintln!("启动后端服务器失败: {}", e);
+            eprintln!("请手动启动后端服务器:");
+            eprintln!("  cd backend && uv run python run.py");
         }
     }
 
