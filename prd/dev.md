@@ -994,7 +994,11 @@ if *paused.lock().unwrap() {
 }
 ```
 
-## 6. AI Prompt 动态生成
+## 6. AI Prompt 设计（高效模式）
+
+**重要变更**：为降低 AI 调用成本，采用"AI 列映射分析 + 本地验证导入"的两阶段处理。
+- 旧方案：每行数据调用 AI 提取，Token 消耗巨大
+- 新方案：每个 Sheet 仅调用 1 次 AI 进行列映射分析，节省 99.9% 的 AI 调用
 
 ### 6.1 字段元数据生成 Prompt
 
@@ -1029,235 +1033,266 @@ if *paused.lock().unwrap() {
   "field_name": "phone",
   "extraction_hint": "11位数字的中国大陆手机号码"
 }
-
-输入：
-- 字段标签：公司名称
-- 字段类型：text
-
-输出：
-{
-  "field_name": "company_name",
-  "extraction_hint": "公司或组织的完整名称"
-}
-
-输入：
-- 字段标签：所在地区
-- 字段类型：text
-
-输出：
-{
-  "field_name": "region",
-  "extraction_hint": "省市区地址信息，可从地址字段提取，也可从公司名称推断"
-}
 ```
 
-**实现**:
-```rust
-async fn generate_field_metadata(
-    field_label: &str,
-    field_type: &str,
-    ai_config: &AiConfig
-) -> Result<FieldMetadata, String> {
-    let prompt = format!(
-        "你是一个数据建模专家。用户正在创建一个数据提取字段，请帮助生成字段的元数据。\n\n\
-         字段信息：\n\
-         - 字段标签（中文）：{}\n\
-         - 字段类型：{}\n\n\
-         请生成以下内容：\n\
-         1. 标准的英文字段名（遵循 snake_case 命名规范，如 phone_number, company_name）\n\
-         2. 数据提取提示（简洁描述如何识别和提取这个字段，用于指导 AI 提取数据）\n\n\
-         请以 JSON 格式返回：\n\
-         {{\n\
-           \"field_name\": \"生成的英文字段名\",\n\
-           \"extraction_hint\": \"提取提示说明\"\n\
-         }}",
-        field_label, field_type
-    );
+### 6.2 AI 列映射分析 Prompt（核心）
 
-    let response = call_ai_api(&prompt, ai_config).await?;
-    let metadata: FieldMetadata = serde_json::from_str(&response)?;
-    Ok(metadata)
-}
-```
-
-### 6.2 表头识别 Prompt
-
-表头识别 Prompt 保持通用，不依赖项目字段定义：
+每个 Sheet 仅调用 1 次，分析表头位置和列映射关系：
 
 ```
-你是一个表格分析专家。以下是一个 Excel 表格的前 5 行数据：
+你是一个数据表格分析专家。以下是一个 Excel 表格的前 10 行数据：
 
-[第 1 行] {row_1_data}
-[第 2 行] {row_2_data}
-[第 3 行] {row_3_data}
-[第 4 行] {row_4_data}
-[第 5 行] {row_5_data}
+[第 1 行] 值1 | 值2 | 值3 | ...
+[第 2 行] 值1 | 值2 | 值3 | ...
+...
+[第 10 行] 值1 | 值2 | 值3 | ...
 
-请分析并判断：
-1. 第几行是表头？（返回行号 1-5，如果没有表头则返回 0）
-2. 表头包含哪些字段？（返回字段列表，如果没有表头则返回空数组）
-
-请以 JSON 格式返回：
-{
-  "header_row": 1,  // 1-5 表示表头行号，0 表示无表头
-  "headers": ["字段1", "字段2", "字段3", ...]  // 无表头时返回 []
-}
-```
-
-### 6.3 数据提取 Prompt（动态生成）
-
-根据项目的字段定义动态生成提取 Prompt：
-
-```rust
-// 获取项目字段定义
-let fields = get_project_fields(project_id)?;
-
-// 构建字段提取说明
-let mut field_descriptions = vec![];
-for field in &fields {
-    let desc = format!(
-        "- {}（{}）{}{}",
-        field.field_label,
-        field.field_type,
-        if field.is_required { "【必填】" } else { "" },
-        if !field.extraction_hint.is_empty() {
-            format!("：{}", field.extraction_hint)
-        } else {
-            String::new()
-        }
-    );
-    field_descriptions.push(desc);
-}
-
-// 构建 JSON 返回格式说明
-let mut json_fields = vec![];
-for field in &fields {
-    json_fields.push(format!("  \"{}\": \"提取的{}\"", field.field_name, field.field_label));
-}
-```
-
-#### 6.3.1 有表头的表格
-
-```
-你是一个数据提取专家。请从以下数据中提取指定字段：
-
-原始数据：
-{formatted_row_data}  // 格式：表头1:值1; 表头2:值2; ...
-
-请提取以下字段：
-{field_descriptions}  // 动态生成的字段列表
-
-请以 JSON 格式返回：
-{
-{json_fields}  // 动态生成的 JSON 字段
-}
-
-如果某个字段无法提取，请返回空字符串。
-```
-
-**示例（客户信息提取项目）**：
-```
-你是一个数据提取专家。请从以下数据中提取指定字段：
-
-原始数据：
-姓名:张三; 联系方式:13800138000; 单位:北京XX科技公司; 邮箱:zhangsan@example.com
-
-请提取以下字段：
-- 姓名（text）【必填】：支持中文、英文、带称呼如"李先生"、"王总"
+项目需要提取的字段：
+- 姓名（text）【必填】：支持中文、英文、带称呼
 - 手机号（phone）【必填】：11位数字
-- 公司（text）
-- 地区（text）：优先从地址字段提取，也可从公司名称推演，如"北京XX公司"→"北京市"
 - 邮箱（email）
+- ...
+
+请分析：
+1. 第几行是表头？（返回 1-10，如果没有表头返回 0）
+2. 每一列对应哪个字段？（返回列索引到字段名的映射）
 
 请以 JSON 格式返回：
 {
-  "name": "提取的姓名",
-  "phone": "提取的手机号",
-  "company": "提取的公司",
-  "region": "提取的地区",
-  "email": "提取的邮箱"
+  "header_row": 1,
+  "column_mappings": {
+    "0": "name",      // 第 1 列对应姓名字段
+    "2": "phone",     // 第 3 列对应手机号字段
+    "5": "email"      // 第 6 列对应邮箱字段
+  },
+  "confidence": 0.95,
+  "unmatched_columns": [1, 3, 4]  // 未匹配的列
 }
-
-如果某个字段无法提取，请返回空字符串。
 ```
 
-#### 6.3.2 无表头的表格
+**实现（Python）**:
+```python
+from dataclasses import dataclass
+from typing import Dict, List
 
-```
-你是一个数据提取专家。请从以下原始数据中提取指定字段：
+@dataclass
+class ColumnMapping:
+    """列映射结果"""
+    header_row: int                    # 表头行号 (0=无表头, 1-10=表头位置)
+    column_mappings: Dict[int, str]    # 列索引 -> 字段名 的映射
+    confidence: float                  # 匹配置信度
+    unmatched_columns: List[int]       # 未匹配的列索引
 
-原始数据：
-{raw_row_data}  // 格式：值1 | 值2 | 值3 | ...
+async def analyze_column_mapping(
+    self,
+    sample_rows: List[List[str]],      # 前 10 行数据
+    fields: List[ProjectField]         # 项目字段定义
+) -> ColumnMapping:
+    """分析列与项目字段的匹配关系"""
 
-请提取以下字段：
-{field_descriptions}  // 动态生成的字段列表
+    # 构建字段描述
+    field_descriptions = []
+    for f in fields:
+        desc = f"- {f.field_label}（{f.field_type}）"
+        if f.is_required:
+            desc += "【必填】"
+        if f.extraction_hint:
+            desc += f"：{f.extraction_hint}"
+        field_descriptions.append(desc)
+
+    # 构建样本数据
+    sample_text = "\n".join([
+        f"[第 {i+1} 行] {' | '.join(str(cell) for cell in row)}"
+        for i, row in enumerate(sample_rows)
+    ])
+
+    prompt = f"""你是一个数据表格分析专家。以下是一个 Excel 表格的前 10 行数据：
+
+{sample_text}
+
+项目需要提取的字段：
+{chr(10).join(field_descriptions)}
+
+请分析：
+1. 第几行是表头？（返回 1-10，如果没有表头返回 0）
+2. 每一列对应哪个字段？（返回列索引到字段名的映射）
 
 请以 JSON 格式返回：
-{
-{json_fields}  // 动态生成的 JSON 字段
-}
+{{
+  "header_row": 1,
+  "column_mappings": {{
+    "0": "name",
+    "2": "phone"
+  }},
+  "confidence": 0.95,
+  "unmatched_columns": [1, 3, 4]
+}}"""
 
-如果某个字段无法提取，请返回空字符串。
+    response = await self.call_api(prompt, self.config)
+    return ColumnMapping(**json.loads(response))
 ```
 
-### 6.4 Prompt 生成实现
+### 6.3 本地数据验证（无 AI 调用）
 
-```rust
-fn generate_extraction_prompt(
-    project_id: i32,
-    row_data: &str,
-    has_header: bool
-) -> Result<String, String> {
-    // 获取项目字段定义
-    let fields = get_project_fields(project_id)?;
+根据列映射结果直接读取数据，使用本地验证规则：
 
-    // 构建字段描述
-    let field_descriptions = fields.iter()
-        .map(|f| {
-            format!(
-                "- {}（{}）{}{}",
-                f.field_label,
-                f.field_type,
-                if f.is_required { "【必填】" } else { "" },
-                if !f.extraction_hint.is_empty() {
-                    format!("：{}", f.extraction_hint)
-                } else {
-                    String::new()
+```python
+class DataValidator:
+    """数据格式验证器"""
+
+    # 预定义验证规则
+    VALIDATORS = {
+        "phone": r"^1[3-9]\d{9}$",           # 11位手机号
+        "email": r"^[\w\.-]+@[\w\.-]+\.\w+$", # 邮箱
+        "url": r"^https?://",                # URL
+        "date": r"^\d{4}[-/]\d{1,2}[-/]\d{1,2}$",  # 日期
+    }
+
+    def validate(
+        self,
+        value: Any,
+        field: ProjectField
+    ) -> Tuple[bool, Optional[str]]:
+        """
+        验证数据
+
+        Args:
+            value: 要验证的值
+            field: 字段定义（包含 field_type, validation_rule, is_required）
+
+        Returns:
+            (是否有效, 错误信息)
+        """
+        # 1. 必填检查
+        if field.is_required and not value:
+            return False, "必填字段不能为空"
+
+        # 2. 空值跳过（非必填）
+        if not value:
+            return True, None
+
+        # 3. 类型验证
+        if field.field_type in self.VALIDATORS:
+            pattern = self.VALIDATORS[field.field_type]
+            if not re.match(pattern, str(value)):
+                return False, f"格式不正确，期望 {field.field_type}"
+
+        # 4. 自定义规则验证
+        if field.validation_rule:
+            try:
+                if not re.match(field.validation_rule, str(value)):
+                    return False, "不符合验证规则"
+            except re.error:
+                pass
+
+        return True, None
+
+    def normalize(self, value: Any, field_type: str) -> Any:
+        """标准化数据"""
+        if not value:
+            return value
+
+        value_str = str(value).strip()
+
+        if field_type == "phone":
+            # 去除空格、横线
+            return re.sub(r"[\s\-]", "", value_str)
+        elif field_type == "email":
+            # 转小写
+            return value_str.lower()
+        elif field_type == "date":
+            # 统一日期格式
+            return value_str.replace("/", "-")
+
+        return value_str
+```
+
+### 6.4 数据处理流程实现
+
+```python
+async def process_sheet(
+    self,
+    sheet_name: str,
+    file_path: str
+) -> Dict[str, Any]:
+    """处理单个 Sheet（高效模式）"""
+
+    # ========== 阶段一：AI 分析列映射（每 sheet 仅 1 次）==========
+
+    # 1. 读取前 10 行样本
+    sheet = self.parser.get_sheet(sheet_name)
+    sample_rows = self.parser.read_rows(sheet, start_row=1, count=10)
+
+    # 2. AI 分析列映射
+    mapping = await self.ai_client.analyze_column_mapping(
+        sample_rows=sample_rows,
+        fields=self.fields
+    )
+
+    # 3. 记录映射结果
+    self.send_progress("column_mapping",
+        sheet_name=sheet_name,
+        header_row=mapping.header_row,
+        mappings=mapping.column_mappings,
+        confidence=mapping.confidence
+    )
+
+    # 4. 确定数据起始行
+    start_row = mapping.header_row + 1 if mapping.header_row > 0 else 1
+
+    # ========== 阶段二：本地验证导入（无 AI 调用）==========
+
+    validator = DataValidator()
+    total_rows = self.parser.get_total_rows(sheet, start_row)
+    success_count = 0
+    error_count = 0
+
+    # 5. 逐行读取 -> 验证 -> 存储
+    for row_num, row_data in self.parser.iterate_rows(sheet, start_row):
+        if self.cancelled:
+            break
+
+        # 根据映射提取字段值
+        record = {}
+        for col_idx, field_name in mapping.column_mappings.items():
+            if col_idx < len(row_data):
+                record[field_name] = row_data[col_idx]
+
+        # 格式验证
+        is_valid, errors = self._validate_record(record, validator)
+
+        if is_valid:
+            # 存储记录
+            self.storage.insert_record(
+                self.project.id,
+                record,
+                meta={
+                    "source_file": file_path,
+                    "source_sheet": sheet_name,
+                    "row_number": row_num,
+                    "batch_number": self.batch_number
                 }
             )
+            success_count += 1
+        else:
+            # 记录验证错误
+            self._save_error_record(record, errors, row_num)
+            error_count += 1
+
+        # 发送进度
+        self.send_progress("row_processed", {
+            "current_row": row_num,
+            "total_rows": total_rows,
+            "success_count": success_count,
+            "error_count": error_count
         })
-        .collect::<Vec<_>>()
-        .join("\n");
 
-    // 构建 JSON 字段
-    let json_fields = fields.iter()
-        .map(|f| format!("  \"{}\": \"提取的{}\"", f.field_name, f.field_label))
-        .collect::<Vec<_>>()
-        .join(",\n");
-
-    // 根据是否有表头选择模板
-    let template = if has_header {
-        format!(
-            "你是一个数据提取专家。请从以下数据中提取指定字段：\n\n\
-             原始数据：\n{}\n\n\
-             请提取以下字段：\n{}\n\n\
-             请以 JSON 格式返回：\n{{\n{}\n}}\n\n\
-             如果某个字段无法提取，请返回空字符串。",
-            row_data, field_descriptions, json_fields
-        )
-    } else {
-        format!(
-            "你是一个数据提取专家。请从以下原始数据中提取指定字段：\n\n\
-             原始数据：\n{}\n\n\
-             请提取以下字段：\n{}\n\n\
-             请以 JSON 格式返回：\n{{\n{}\n}}\n\n\
-             如果某个字段无法提取，请返回空字符串。",
-            row_data, field_descriptions, json_fields
-        )
-    };
-
-    Ok(template)
-}
+    return {
+        "total_rows": total_rows,
+        "success_count": success_count,
+        "error_count": error_count
+    }
+```
 ```
 
 ## 7. 性能优化策略

@@ -4,9 +4,9 @@
 
 | 阶段 | 任务 | 状态 | 负责人 | 预计工期 | 实际工期 | 备注 |
 |------|------|------|--------|----------|----------|------|
-| Phase 1 | 项目初始化 | ⬜ 未开始 | - | 1天 | - | Nuxt + Tauri 环境搭建 |
-| Phase 2 | 数据库和基础服务 | ⬜ 未开始 | - | 2-3天 | - | SQLite 表结构、存储服务 |
-| Phase 3 | AI 集成和 Excel 解析 | ⬜ 未开始 | - | 2天 | - | AI 客户端、Excel 解析器 |
+| Phase 1 | 项目初始化 | ✅ 已完成 | - | 1天 | 1天 | Nuxt 4 + Tauri 2 + Nuxt UI 4 |
+| Phase 2 | 数据库和基础服务 | ✅ 已完成 | - | 2-3天 | 2天 | Python FastAPI + SQLAlchemy |
+| Phase 3 | AI 集成和 Excel 解析 | ✅ 已完成 | - | 2天 | 1天 | AI 客户端、Excel 解析、存储服务 |
 | Phase 4 | Tauri Commands | ⬜ 未开始 | - | 1天 | - | 前后端通信接口 |
 | Phase 5 | 前端 - 项目管理 | ⬜ 未开始 | - | 2天 | - | 项目列表、创建、切换 |
 | Phase 6 | 前端 - 字段定义 | ⬜ 未开始 | - | 2天 | - | 类 Excel 编辑器 |
@@ -21,7 +21,139 @@
 - ⚠️ 有问题
 - 🔴 已阻塞
 
-**总进度**：0/9 (0%)
+**总进度**：3/9 (33%)
+
+## 已完成工作详情
+
+### Phase 1: 项目初始化 ✅
+
+**完成时间**: 2026-02-17
+
+**已完成任务**:
+- [x] 创建 Nuxt 4 项目
+- [x] 安装 Tauri 2 CLI 并初始化
+- [x] 安装 Nuxt UI 4.x
+- [x] 配置项目结构 (app/pages 目录结构)
+- [x] 配置 Pinia 状态管理
+- [x] 修复 Node.js 23 兼容性问题
+
+**技术栈确认**:
+- 前端: Nuxt 4.3.1 + Vue 3.5.28 + Nuxt UI 4.4.0
+- 桌面框架: Tauri 2.10.0
+- 状态管理: Pinia 3.0.4
+
+### Phase 2: 数据库和基础服务 ✅
+
+**完成时间**: 2026-02-17
+
+**架构变更**: 从 Rust 后端迁移到 Python FastAPI
+
+**已完成任务**:
+- [x] 创建 Python 后端项目结构
+- [x] 实现数据库模型 (SQLAlchemy)
+  - `Project` - 项目模型
+  - `ProjectField` - 字段定义模型
+  - `ProcessingTask` - 任务模型
+  - `AiConfig` - AI 配置模型
+  - `Batch` - 批次模型
+- [x] 实现 Pydantic Schemas
+- [x] 实现 API 路由
+  - `/api/projects` - 项目 CRUD
+  - `/api/fields` - 字段 CRUD
+  - `/api/ai-configs` - AI 配置 CRUD
+- [x] 数据库自动初始化
+
+**技术栈**:
+- 后端: FastAPI + SQLAlchemy + uvicorn
+- 数据库: SQLite (data/app.db)
+- 包管理: uv
+
+### Phase 3: AI 集成和 Excel 解析 ✅
+
+**完成时间**: 2026-02-17
+
+**重要变更**：采用"AI 列映射分析 + 本地验证导入"的两阶段处理，节省 99.9% 的 AI 调用。
+
+**已完成任务**:
+- [x] 实现 AI 客户端服务 (`services/ai_client.py`)
+  - OpenAI SDK 集成
+  - 字段元数据生成 Prompt
+  - **AI 列映射分析 Prompt**（每 Sheet 仅 1 次 AI 调用）
+  - 错误重试机制 (最多 3 次)
+  - 超时控制 (30 秒)
+  - 测试连接功能
+
+- [x] 实现 Excel 解析服务 (`services/excel_parser.py`)
+  - 使用 openpyxl 读取 Excel
+  - 遍历 sheets 和行
+  - 空行检测 (连续 10 行跳过)
+  - Sheet 预览功能
+  - **按列索引读取数据**
+
+- [x] 实现数据存储服务 (`services/storage.py`)
+  - 动态表创建/管理
+  - 记录 CRUD 操作
+  - 去重处理（skip/update/merge）
+  - 分页查询
+  - 数据导出（xlsx/csv）
+
+- [x] **实现数据验证器 (`services/validator.py`)** - 新增
+  - 必填字段验证
+  - 类型验证（phone, email, url, date）
+  - 自定义正则验证
+  - 数据标准化（手机号去空格、邮箱转小写等）
+
+- [x] 实现数据提取协调器 (`services/extractor.py`)
+  - **两阶段处理流程**：
+    - 阶段一：AI 列映射分析（每 Sheet 1 次）
+    - 阶段二：本地验证导入（无 AI 调用）
+  - 批次管理
+  - 进度跟踪
+  - 暂停/恢复/取消控制
+  - 错误记录保存
+
+- [x] 扩展 API 路由
+  - `/api/files` - 文件上传、预览、批次管理
+  - `/api/processing` - 启动/暂停/恢复/取消处理、WebSocket 进度
+  - `/api/results` - 结果查询、更新、删除、导出
+
+- [x] 增强 AI 配置 API
+  - `/api/ai-configs/test-connection` - 测试连接
+  - `/api/ai-configs/{id}/set-default` - 设置默认配置
+  - `/api/ai-configs/default` - 获取默认配置
+
+**新增文件**:
+- `backend/src/redata/services/ai_client.py`
+- `backend/src/redata/services/excel_parser.py`
+- `backend/src/redata/services/storage.py`
+- `backend/src/redata/services/validator.py` **(新增)**
+- `backend/src/redata/services/extractor.py`
+- `backend/src/redata/api/files.py`
+- `backend/src/redata/api/processing.py`
+- `backend/src/redata/api/results.py`
+
+**Token 节省对比**:
+- 旧方案：1 个 Sheet 有 1000 行 = 1000 次 AI 调用
+- 新方案：1 个 Sheet = 1 次 AI 调用
+- **节省 99.9% 的 AI 调用**
+
+## 下一步开发计划
+
+### Phase 4: Tauri Commands (下一步)
+
+**预计工期**: 1天
+
+**任务清单**:
+- [ ] 配置 Tauri 启动 FastAPI 后端
+- [ ] 实现文件选择命令
+- [ ] 实现进程间通信
+- [ ] 处理窗口生命周期
+
+### Phase 5-8: 前端界面开发
+
+**预计工期**: 9天
+
+按 prd.md 和 design.md 的设计实现前端界面
 
 ## Context（项目背景）
 
@@ -104,16 +236,15 @@
    - 系统复制文件到 `history/batch_XXX/` 目录（批次号递增）
    - 原文件保持不变
 
-3. **表头识别**（完全自动）：
-   - 读取每个 Sheet 的前 5 行
-   - 提交给 AI 模型识别表头所在行号
-   - 缓存表头信息用于后续提取
+3. **AI 列映射分析**（每 Sheet 仅 1 次）：
+   - 读取每个 Sheet 的前 10 行
+   - 提交给 AI 模型分析表头位置和列映射关系
+   - 返回：`{header_row, column_mappings, confidence}`
 
-4. **数据提取**：
-   - 根据项目字段定义动态生成 AI Prompt
-   - 逐行读取数据
-   - 组装「表头:值」格式（有表头）或原始数据（无表头）
-   - 提交给 AI 模型提取项目定义的字段
+4. **本地验证导入**（无 AI 调用）：
+   - 根据列映射读取对应列的数据
+   - 使用格式验证规则检查数据有效性
+   - 逐行导入到数据库
    - 连续 10 个空行则跳过当前 Sheet
 
 5. **数据存储**：
@@ -167,21 +298,24 @@
 
 ### Phase 3：AI 集成和 Excel 解析（第 4-5 天）
 
-**目标**: 实现 AI 客户端和 Excel 解析功能
+**目标**: 实现 AI 客户端和 Excel 解析功能（高效模式）
 
 **任务清单**:
-- [ ] 实现 AI 客户端（ai_client.rs）
+- [ ] 实现 AI 客户端（ai_client.py）
 - [ ] 集成 OpenAI SDK
 - [ ] 实现字段元数据生成 Prompt
-- [ ] 实现表头识别 Prompt
-- [ ] 实现数据提取 Prompt（动态生成）
+- [ ] **实现 AI 列映射分析 Prompt**（每 Sheet 仅 1 次）
 - [ ] 实现错误重试机制
-- [ ] 实现 Excel 解析（excel_parser.rs）
-- [ ] 实现数据提取服务（extractor.rs）
+- [ ] 实现 Excel 解析（excel_parser.py）
+- [ ] **实现数据验证器（validator.py）**
+- [ ] 实现数据提取服务（extractor.py）
 
-**验收标准**: AI 可以正确识别表头和提取数据，Excel 文件可以正常解析
+**验收标准**:
+- AI 可以正确分析列映射关系
+- 本地验证器可以正确验证数据格式
+- Excel 文件可以正常解析和导入
 
-**技术参考**: 详见 dev.md 第 4.2.2 章（Services）、第 6 章（AI Prompt 动态生成）
+**技术参考**: 详见 dev.md 第 4.2.2 章（Services）、第 6 章（AI Prompt 设计）
 
 ### Phase 4：Tauri Commands（第 6 天）
 

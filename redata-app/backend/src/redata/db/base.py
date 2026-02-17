@@ -10,6 +10,11 @@ os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
 # 数据库连接
 SQLALCHEMY_DATABASE_URL = f"sqlite:///{DB_PATH}"
 
+
+def get_db_url() -> str:
+    """获取数据库 URL"""
+    return SQLALCHEMY_DATABASE_URL
+
 engine = create_engine(
     SQLALCHEMY_DATABASE_URL,
     connect_args={"check_same_thread": False}
