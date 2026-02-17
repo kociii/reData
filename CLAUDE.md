@@ -4,18 +4,17 @@
 
 ## 项目概述
 
-**reData** 是一个基于 Tauri 构建的智能表格数据提取系统桌面应用。它使用 AI 模型自动识别表头，并从数百万个非标准化的 Excel 文件中提取结构化数据（姓名、手机号、公司、地区、邮箱）。
+**reData** 是一个基于 Tauri 构建的智能数据处理平台桌面应用。它是一个多项目管理系统，允许用户创建不同的项目，每个项目可以自定义需要提取的字段。系统使用 AI 模型自动识别表头，并从数百万个非标准化的 Excel 文件中提取结构化数据。
 
 **核心能力**：
-- AI 驱动的表头识别（处理不同行位置的表头或无表头情况）
-- 从非结构化 Excel 数据中智能提取字段
-- 灵活的姓名格式（中文、英文、带称呼如"李先生"、"王总"）
-- 11 位手机号提取
-- 当地址字段不可用时从公司名称推断地区
-- 邮箱提取
-- 多文件并行处理，实时进度跟踪
-- 按手机号自动去重
-- 本地 SQLite 存储，完整数据可追溯
+- **多项目管理**：用户可以创建多个独立项目，每个项目有独立的字段定义和数据存储
+- **灵活的字段定义**：使用类 Excel 的表格编辑器，轻松定义需要提取的字段
+- **AI 驱动的表头识别**：自动识别表头位置（处理不同行位置的表头或无表头情况）
+- **智能字段提取**：根据项目字段定义，从非结构化 Excel 数据中智能提取任意自定义字段
+- **可配置去重**：每个项目可以设置是否去重，以及按哪些字段去重
+- **多文件并行处理**：实时进度跟踪
+- **本地 SQLite 存储**：每个项目独立存储，完整数据可追溯
+- **AI 辅助字段定义**：自动生成英文字段名和提取提示
 
 ## 技术栈
 
@@ -48,6 +47,8 @@
 **后端 → 前端**: 通过 `app.emit_all()` 发送事件进行实时进度更新
 
 **命令模块**（位于 `src-tauri/src/commands/`）：
+- `project.rs` - 项目的 CRUD 操作
+- `field.rs` - 字段定义的 CRUD 操作
 - `file.rs` - 文件选择，批量复制到 `history/batch_XXX/`
 - `processing.rs` - 启动/暂停/恢复/取消处理任务
 - `config.rs` - AI 配置的 CRUD 操作
@@ -60,13 +61,16 @@
 - `ai_client.rs` - 调用 AI API，带重试逻辑（最多 3 次尝试，30 秒超时）
 - `extractor.rs` - 协调提取流程：
   1. 读取前 5 行 → AI 识别表头行
-  2. 处理数据行 → AI 提取目标字段
-  3. 连续 10 个空行后跳过 sheet
-- `storage.rs` - SQLite 操作，使用 `INSERT OR IGNORE` 进行手机号去重
+  2. 根据项目字段定义动态生成 AI Prompt
+  3. 处理数据行 → AI 提取项目定义的字段
+  4. 连续 10 个空行后跳过 sheet
+- `storage.rs` - SQLite 操作，动态表创建和管理，根据项目去重配置处理重复
 
 ### 状态管理（Pinia）
 
-**三个主要 store**：
+**主要 store**：
+- `projectStore` - 项目列表、当前项目、项目 CRUD
+- `fieldStore` - 字段定义、字段编辑
 - `processingStore` - 活动任务、进度、选中的任务
 - `resultStore` - 提取的记录、分页、筛选器
 - `configStore` - AI 配置、默认配置
@@ -89,17 +93,25 @@ listen('processing-progress', (event) => {
 
 ## 数据库架构
 
-**4 个核心表**：
+**核心表**：
 
-1. **extracted_records** - 提取的数据，字段包括：name（支持中文/英文/称呼）、phone（11 位数字，UNIQUE 用于去重）、company、region（可从公司名称推断）、email、raw_content、来源追踪
-2. **processing_tasks** - 任务跟踪，UUID 主键，状态枚举（pending/processing/paused/completed/cancelled）
-3. **ai_configs** - AI 模型配置，加密的 API 密钥，is_default 标志
-4. **batches** - 批次统计（batch_001、batch_002...）
+1. **projects** - 项目表，包含项目名称、描述、去重配置
+2. **project_fields** - 项目字段定义表，包含字段名、显示名称、类型、验证规则、AI 提取提示
+3. **project_{id}_records** - 动态创建的项目数据表，每个项目一个独立的表，表结构根据项目字段定义动态生成
+4. **processing_tasks** - 任务跟踪，UUID 主键，状态枚举（pending/processing/paused/completed/cancelled）
+5. **ai_configs** - AI 模型配置，加密的 API 密钥，is_default 标志
+6. **batches** - 批次统计（batch_001、batch_002...）
+
+**关键特性**：
+- 每个项目创建独立的数据表（`project_{id}_records`）
+- 表结构根据项目字段定义动态生成
+- 支持动态添加/删除字段（ALTER TABLE 或重建表）
+- 根据项目去重配置创建相应的 UNIQUE 索引
 
 **关键索引**：
-- `idx_phone` on extracted_records(phone) - 快速去重检查
-- `idx_batch` on extracted_records(batch_number) - 批次查询
+- 项目数据表根据去重配置动态创建索引
 - `idx_task_status` on processing_tasks(status) - 活动任务查询
+- `idx_project_id` on project_fields(project_id) - 字段查询
 
 ## 开发命令
 
@@ -174,13 +186,17 @@ if *paused.lock().unwrap() {
 
 ### 手机号去重
 
-在数据库层面使用 UNIQUE 约束处理：
+根据项目去重配置动态处理：
 
 ```rust
+// 单字段去重
 conn.execute(
-    "INSERT OR IGNORE INTO extracted_records (...) VALUES (...)",
+    "INSERT OR IGNORE INTO project_1_records (...) VALUES (...)",
     params![...],
 )?;
+
+// 多字段组合去重
+// 创建 UNIQUE 索引：CREATE UNIQUE INDEX idx_dedup ON project_1_records(phone, email);
 ```
 
 ### AI Prompt 模板
@@ -191,29 +207,54 @@ conn.execute(
 - 以 JSON 格式返回字段列表（如果没有表头则为空数组）
 
 **数据提取**：
-- **有表头**：提交"表头:值"对，AI 以 JSON 格式提取 name/phone/company/region/email
-- **无表头**：直接提交原始行数据，AI 从非结构化内容中提取字段
+- 系统根据项目字段定义动态生成 AI Prompt
+- **有表头**：提交"表头:值"对，AI 根据项目字段定义以 JSON 格式提取字段
+- **无表头**：直接提交原始行数据，AI 从非结构化内容中提取项目定义的字段
 
-**字段提取规则**：
+**字段定义示例**（客户信息提取项目）：
 - **姓名**：支持中文（张三）、英文（John）、称呼（李先生、王总）
 - **手机号**：仅 11 位数字
 - **地区**：从地址字段提取，或从公司名称推断（例如："北京XX公司" → "北京市"）
 - **邮箱**：标准邮箱格式
 
+**注意**：不同项目可以定义完全不同的字段，AI Prompt 会根据项目字段定义动态生成。
+
 ## 文件组织
 
 ### 前端结构
 
-- `src/views/` - 页面组件（ProcessingView、ResultView、SettingsView）
-- `src/components/` - 可复用组件（FileList、SheetPreview、ExtractionResult、ProgressBar）
-- `src/stores/` - Pinia stores（processing、result、config）
-- `src/types/` - TypeScript 类型定义
+- `pages/` - 页面组件（Nuxt 3 自动路由）
+  - `index.vue` - 项目列表页（首页）
+  - `project/[id].vue` - 项目详情页
+  - `project/[id]/fields.vue` - 字段定义页
+  - `project/[id]/processing.vue` - 数据处理页
+  - `project/[id]/results.vue` - 结果展示页
+  - `settings.vue` - 设置页
+- `components/` - 可复用组件
+  - `ProjectCard.vue` - 项目卡片
+  - `FieldEditor.vue` - 字段编辑器（类 Excel 表格）
+  - `FileList.vue` - 文件列表
+  - `SheetPreview.vue` - Sheet 预览
+  - `ExtractionResult.vue` - 提取结果
+  - `ProgressBar.vue` - 进度条
+- `stores/` - Pinia stores（project、field、processing、result、config）
+- `types/` - TypeScript 类型定义
 
 ### 后端结构
 
 - `src-tauri/src/commands/` - Tauri 命令处理器（暴露给前端）
-- `src-tauri/src/services/` - 业务逻辑（Excel 解析、AI 客户端、提取、存储）
-- `src-tauri/src/models/` - 数据模型（Task、Config、Record）
+  - `project.rs` - 项目管理
+  - `field.rs` - 字段定义
+  - `file.rs` - 文件操作
+  - `processing.rs` - 数据处理
+  - `config.rs` - AI 配置
+  - `result.rs` - 结果查询
+- `src-tauri/src/services/` - 业务逻辑
+  - `excel_parser.rs` - Excel 解析
+  - `ai_client.rs` - AI 客户端
+  - `extractor.rs` - 数据提取
+  - `storage.rs` - 数据存储（动态表管理）
+- `src-tauri/src/models/` - 数据模型（Project、Field、Task、Config、Record）
 - `src-tauri/src/db/` - 数据库架构和连接管理
 
 ### 数据目录
@@ -232,7 +273,7 @@ conn.execute(
 ### 错误处理
 
 - 失败的行会被记录但不会停止处理
-- 错误消息存储在 `extracted_records.error_message`
+- 错误消息存储在项目数据表的 `error_message` 字段
 - AI API 失败会触发自动重试（最多 3 次）
 
 ### 空行检测
@@ -251,12 +292,24 @@ conn.execute(
 
 ## 文档
 
-`prd/` 目录中的完整文档：
-- `prd.md` - 产品需求和业务逻辑
-- `design.md` - UI/UX 设计及 ASCII 图表
-- `plan.md` - 实施计划（9 个阶段，15 天）
-- `dev.md` - 技术细节和架构
-- `README.md` - 文档索引
+`prd/` 目录中的完整文档（v2.2.0）：
+- `prd.md` - 产品需求和业务逻辑（446 行，专注于业务需求）
+- `design.md` - UI/UX 设计及 ASCII 图表（1115 行，详细界面设计）
+- `plan.md` - 实施计划（346 行，9 个阶段开发计划）
+- `dev.md` - 技术细节和架构（1736 行，完整技术实现）
+- `README.md` - 文档索引（305 行，文档导航）
+
+**文档职责**：
+- **prd.md**：业务需求（What & Why），不包含技术细节
+- **design.md**：界面设计（How - UI/UX），详细的界面布局和交互流程
+- **plan.md**：开发计划（How - Process），实施步骤和里程碑
+- **dev.md**：技术实现（How - Tech），数据库设计、AI Prompt、代码实现
+
+**重要变更**（v2.2.0）：
+- prd.md 从 632 行减少到 446 行（减少约 30%）
+- 删除所有技术实现细节（已移至 dev.md）
+- 添加交叉引用，形成完整的文档体系
+- 文档重复率从 50% 降至 < 10%
 
 参考这些文档了解详细的业务规则、UI 规范和实施指导。
 
