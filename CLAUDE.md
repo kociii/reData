@@ -19,9 +19,10 @@
 ## 技术栈
 
 **前端**: Nuxt 3.18+ + TypeScript + Nuxt UI 3.x
-**桌面框架**: Tauri 2.x (Rust 后端)
+**桌面框架**: Tauri 2.x
+**后端**: Python 3.11+ + FastAPI
 **数据库**: SQLite 3.40+
-**AI 集成**: OpenAI 兼容 API（支持 GPT-4、Claude、通过 Ollama 的本地模型）
+**AI 集成**: OpenAI SDK（支持 GPT-4、Claude、通过 Ollama 的本地模型）
 
 **前端特性**：
 - Nuxt 3.18+ - 最新稳定版，全栈 Vue 框架
@@ -30,41 +31,42 @@
 - 内置 Pinia - 状态管理
 - TypeScript 支持 - 完整的类型安全
 
-**关键 Rust 依赖**：
-- `calamine` - Excel 文件解析
-- `rusqlite` - SQLite 操作
-- `reqwest` - AI API 调用的 HTTP 客户端
-- `tokio` - 并行处理的异步运行时
-- `uuid` - 任务 ID 生成
+**后端特性**（Python + FastAPI）：
+- FastAPI - 现代 Python Web 框架，自动生成 API 文档
+- SQLAlchemy - Python ORM，类型安全的数据库操作
+- pandas + openpyxl - 强大的 Excel 处理能力
+- OpenAI SDK - 官方 AI 集成库
+- uvicorn - 高性能 ASGI 服务器
 
 ## 架构
 
-### Tauri 命令模式
+### 通信模式
 
-应用使用 Tauri 的命令系统进行前后端通信：
+应用使用 HTTP API 进行前后端通信：
 
-**前端 → 后端**: 通过 `@tauri-apps/api` 调用 Tauri 命令
-**后端 → 前端**: 通过 `app.emit_all()` 发送事件进行实时进度更新
+**前端 → 后端**: 通过 HTTP API 调用后端服务（http://127.0.0.1:8000）
+**后端 → 前端**: 通过 WebSocket 或 Server-Sent Events 进行实时进度更新
 
-**命令模块**（位于 `src-tauri/src/commands/`）：
-- `project.rs` - 项目的 CRUD 操作
-- `field.rs` - 字段定义的 CRUD 操作
-- `file.rs` - 文件选择，批量复制到 `history/batch_XXX/`
-- `processing.rs` - 启动/暂停/恢复/取消处理任务
-- `config.rs` - AI 配置的 CRUD 操作
-- `result.rs` - 查询/更新/导出提取的记录
+### API 路由（位于 `backend/src/redata/api/`）：
+
+- `projects.py` - 项目的 CRUD 操作
+- `fields.py` - 字段定义的 CRUD 操作
+- `ai_configs.py` - AI 配置的 CRUD 操作
+- `files.py` - 文件上传和处理（待实现）
+- `processing.py` - 启动/暂停/恢复/取消处理任务（待实现）
+- `results.py` - 查询/更新/导出提取的记录（待实现）
 
 ### 服务层架构
 
-**服务**（位于 `src-tauri/src/services/`）：
-- `excel_parser.rs` - 使用 calamine 读取 Excel 文件，遍历 sheet/行
-- `ai_client.rs` - 调用 AI API，带重试逻辑（最多 3 次尝试，30 秒超时）
-- `extractor.rs` - 协调提取流程：
+**服务**（位于 `backend/src/redata/services/`）：
+- `excel_parser.py` - 使用 openpyxl/pandas 读取 Excel 文件，遍历 sheet/行
+- `ai_client.py` - 调用 OpenAI API，带重试逻辑（最多 3 次尝试，30 秒超时）
+- `extractor.py` - 协调提取流程：
   1. 读取前 5 行 → AI 识别表头行
   2. 根据项目字段定义动态生成 AI Prompt
   3. 处理数据行 → AI 提取项目定义的字段
   4. 连续 10 个空行后跳过 sheet
-- `storage.rs` - SQLite 操作，动态表创建和管理，根据项目去重配置处理重复
+- `storage.py` - SQLAlchemy 操作，动态表创建和管理，根据项目去重配置处理重复
 
 ### 状态管理（Pinia）
 
@@ -77,18 +79,22 @@
 
 ### 实时进度更新
 
-使用 Tauri 的事件系统：
+使用 WebSocket 或 Server-Sent Events：
 
-```rust
-// 后端发送进度事件
-app.emit_all("processing-progress", ProgressPayload { ... })?;
+```python
+# 后端发送进度事件（FastAPI）
+async def send_progress(progress_data):
+    # 通过 WebSocket 或 SSE 发送进度
+    await websocket.send_json(progress_data)
 ```
 
 ```typescript
 // 前端监听并更新 UI
-listen('processing-progress', (event) => {
-  processingStore.updateProgress(event.payload)
-})
+const ws = new WebSocket('ws://127.0.0.1:8000/ws/progress')
+ws.onmessage = (event) => {
+  const progress = JSON.parse(event.data)
+  processingStore.updateProgress(progress)
+}
 ```
 
 ## 数据库架构
@@ -118,85 +124,91 @@ listen('processing-progress', (event) => {
 ### 初始设置
 
 ```bash
-# 创建 Nuxt 项目
-npx nuxi@latest init
+# 安装前端依赖
+npm install
 
-# 安装 Tauri CLI
-npm install --save-dev @tauri-apps/cli
-
-# 初始化 Tauri
-npm run tauri init
-
-# 安装 Nuxt UI
-npm install @nuxt/ui
-
-# 安装 Rust 依赖（添加到 src-tauri/Cargo.toml）
-# calamine, rusqlite, reqwest, serde, serde_json, tokio, uuid, chrono
+# 安装后端依赖
+cd backend
+uv sync
+cd ..
 ```
 
 ### 开发
 
 ```bash
-# 运行开发服务器（热重载）
-npm run tauri dev
+# 启动后端服务器
+cd backend
+uv run python run.py
 
-# 仅前端（用于 UI 开发）
+# 启动前端开发服务器（另一个终端）
 npm run dev
 
+# 启动 Tauri 开发模式
+npm run tauri:dev
+
 # 生产构建
-npm run tauri build
+npm run tauri:build
 ```
+
+### API 文档
+
+后端 API 文档自动生成：
+- Swagger UI: http://127.0.0.1:8000/docs
+- ReDoc: http://127.0.0.1:8000/redoc
 
 ### 数据库
 
-数据库文件位置：`data/app.db`
-架构初始化：`src-tauri/src/db/schema.rs`
+数据库文件位置：`backend/data/app.db`
+首次运行时自动创建。
 
-开发期间重置数据库：删除 `data/app.db` 并重启应用。
+开发期间重置数据库：删除 `backend/data/app.db` 并重启后端服务器。
 
 ## 关键实现模式
 
 ### 并行文件处理
 
-使用 `tokio::task::spawn` 进行并发文件处理：
+使用 Python 的 asyncio 进行并发文件处理：
 
-```rust
-let mut handles = vec![];
-for file in files {
-    let handle = task::spawn(async move {
-        process_single_file(file).await
-    });
-    handles.push(handle);
-}
+```python
+import asyncio
+
+async def process_files(files):
+    tasks = [process_single_file(file) for file in files]
+    results = await asyncio.gather(*tasks)
+    return results
 ```
 
 ### 暂停/恢复机制
 
-使用 `Arc<Mutex<bool>>` 共享暂停状态：
+使用共享状态标志：
 
-```rust
-let paused = Arc::new(Mutex::new(false));
+```python
+class ProcessingState:
+    def __init__(self):
+        self.paused = False
 
-// 在处理循环中
-if *paused.lock().unwrap() {
-    tokio::time::sleep(Duration::from_millis(100)).await;
-    continue;
-}
+    async def process_with_pause_support(self):
+        while self.paused:
+            await asyncio.sleep(0.1)
+        # 继续处理
 ```
 
-### 手机号去重
+### 去重处理
 
 根据项目去重配置动态处理：
 
-```rust
-// 单字段去重
-conn.execute(
-    "INSERT OR IGNORE INTO project_1_records (...) VALUES (...)",
-    params![...],
-)?;
+```python
+# 单字段去重
+# SQLAlchemy 会自动处理 UNIQUE 约束
+try:
+    db.add(record)
+    db.commit()
+except IntegrityError:
+    db.rollback()  # 跳过重复记录
 
-// 多字段组合去重
-// 创建 UNIQUE 索引：CREATE UNIQUE INDEX idx_dedup ON project_1_records(phone, email);
+# 多字段组合去重
+# 在创建表时添加 UNIQUE 约束
+UniqueConstraint('phone', 'email', name='uq_phone_email')
 ```
 
 ### AI Prompt 模板
@@ -242,25 +254,28 @@ conn.execute(
 
 ### 后端结构
 
-- `src-tauri/src/commands/` - Tauri 命令处理器（暴露给前端）
-  - `project.rs` - 项目管理
-  - `field.rs` - 字段定义
-  - `file.rs` - 文件操作
-  - `processing.rs` - 数据处理
-  - `config.rs` - AI 配置
-  - `result.rs` - 结果查询
-- `src-tauri/src/services/` - 业务逻辑
-  - `excel_parser.rs` - Excel 解析
-  - `ai_client.rs` - AI 客户端
-  - `extractor.rs` - 数据提取
-  - `storage.rs` - 数据存储（动态表管理）
-- `src-tauri/src/models/` - 数据模型（Project、Field、Task、Config、Record）
-- `src-tauri/src/db/` - 数据库架构和连接管理
+- `backend/src/redata/api/` - API 路由（FastAPI）
+  - `projects.py` - 项目管理
+  - `fields.py` - 字段定义
+  - `files.py` - 文件操作（待实现）
+  - `processing.py` - 数据处理（待实现）
+  - `ai_configs.py` - AI 配置
+  - `results.py` - 结果查询（待实现）
+- `backend/src/redata/services/` - 业务逻辑
+  - `excel_parser.py` - Excel 解析（待实现）
+  - `ai_client.py` - AI 客户端（待实现）
+  - `extractor.py` - 数据提取（待实现）
+  - `storage.py` - 数据存储（动态表管理，待实现）
+- `backend/src/redata/models/` - 数据模型
+  - `project.py` - SQLAlchemy 模型（Project、ProjectField、ProcessingTask、AiConfig、Batch）
+  - `schemas.py` - Pydantic schemas（请求/响应验证）
+- `backend/src/redata/db/` - 数据库配置
+  - `base.py` - 数据库连接和初始化
 
 ### 数据目录
 
 - `history/batch_XXX/` - 复制的 Excel 文件（保留原始文件，实现可追溯性）
-- `data/app.db` - SQLite 数据库文件
+- `backend/data/app.db` - SQLite 数据库文件
 
 ## 重要约定
 
