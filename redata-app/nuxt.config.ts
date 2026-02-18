@@ -6,12 +6,12 @@ export default defineNuxtConfig({
   css: ['~/assets/css/main.css'],
   ssr: false, // Tauri 需要 SPA 模式
 
-  // Nuxt UI 配置 - 禁用自动字体加载（使用国内镜像）
+  // Nuxt UI 配置 - 使用系统字体
   ui: {
-    fonts: false, // 完全禁用内置字体功能
+    fonts: false, // 禁用内置字体，使用系统字体
   },
 
-  // 自定义 head 配置 - 使用国内 Google Fonts 镜像
+  // 自定义 head 配置
   app: {
     head: {
       link: [
@@ -36,19 +36,6 @@ export default defineNuxtConfig({
           rel: 'apple-touch-icon',
           sizes: '180x180',
           href: '/apple-touch-icon.png',
-        },
-        {
-          rel: 'preconnect',
-          href: 'https://www.googlefonts.cn',
-        },
-        {
-          rel: 'preconnect',
-          href: 'https://www.googlefonts.cn',
-          crossorigin: 'anonymous',
-        },
-        {
-          rel: 'stylesheet',
-          href: 'https://www.googlefonts.cn/css2?family=Inter:wght@400;500;600;700&display=swap',
         },
       ],
     },
