@@ -71,3 +71,12 @@ npm-debug.log*
 # Cache
 .cache/
 .parcel-cache/
+
+# Claude Code
+CLAUDE.md
+
+# Test data
+test-data/
+
+# History data (batch processing results)
+redata-app/backend/history/
