@@ -272,7 +272,7 @@ async function saveConfig() {
         name: configForm.name.trim(),
         model_name: configForm.model_name.trim(),
         api_key: configForm.api_key.trim(),
-        api_url: configForm.api_url.trim() || undefined,
+        api_url: configForm.api_url.trim() || 'https://api.openai.com/v1',
         is_default: configForm.is_default,
       })
       toast.add({ title: '配置已创建', color: 'success' })

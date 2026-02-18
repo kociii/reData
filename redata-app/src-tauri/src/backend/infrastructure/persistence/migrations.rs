@@ -21,6 +21,9 @@ pub async fn run_migrations(db: &DatabaseConnection) -> Result<(), DbErr> {
     // 创建 batches 表
     create_batches_table(db).await?;
 
+    // 创建 project_records 表（JSON 统一存储）
+    create_project_records_table(db).await?;
+
     tracing::info!("Database migrations completed");
 
     Ok(())
@@ -180,5 +183,51 @@ async fn create_batches_table(db: &DatabaseConnection) -> Result<(), DbErr> {
     .await?;
 
     tracing::debug!("Created batches table");
+    Ok(())
+}
+
+async fn create_project_records_table(db: &DatabaseConnection) -> Result<(), DbErr> {
+    let sql = r#"
+        CREATE TABLE IF NOT EXISTS project_records (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            project_id INTEGER NOT NULL,
+            data TEXT NOT NULL DEFAULT '{}',
+            source_file TEXT,
+            source_sheet TEXT,
+            row_number INTEGER,
+            batch_number TEXT,
+            status TEXT NOT NULL DEFAULT 'success',
+            error_message TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT
+        )
+    "#;
+
+    db.execute(Statement::from_string(
+        db.get_database_backend(),
+        sql.to_string(),
+    ))
+    .await?;
+
+    // 创建索引
+    db.execute(Statement::from_string(
+        db.get_database_backend(),
+        "CREATE INDEX IF NOT EXISTS idx_project_records_project_id ON project_records(project_id)".to_string(),
+    ))
+    .await?;
+
+    db.execute(Statement::from_string(
+        db.get_database_backend(),
+        "CREATE INDEX IF NOT EXISTS idx_project_records_batch ON project_records(project_id, batch_number)".to_string(),
+    ))
+    .await?;
+
+    db.execute(Statement::from_string(
+        db.get_database_backend(),
+        "CREATE INDEX IF NOT EXISTS idx_project_records_status ON project_records(project_id, status)".to_string(),
+    ))
+    .await?;
+
+    tracing::debug!("Created project_records table");
     Ok(())
 }

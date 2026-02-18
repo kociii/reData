@@ -41,7 +41,7 @@
               字段类型
             </th>
             <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-              字段名
+              字段英文名
             </th>
             <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
               验证规则
@@ -164,15 +164,17 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, reactive } from 'vue'
+import { ref, computed, reactive, onMounted } from 'vue'
 import { useFieldStore } from '~/stores/field'
-import { fieldsApi } from '~/utils/api'
+import { useConfigStore } from '~/stores/config'
+import { fieldsApi, aiServiceApi } from '~/utils/api'
 import type { ProjectField } from '~/types'
 
 const route = useRoute()
 const toast = useToast()
 const projectId = computed(() => Number(route.params.id))
 const fieldStore = useFieldStore()
+const configStore = useConfigStore()
 
 // 字段类型选项
 const fieldTypes = [
@@ -226,28 +228,89 @@ function closeFieldModal() {
 async function saveField() {
   if (!fieldForm.field_label.trim()) return
 
+  // 编辑模式下验证 ID 有效性
+  if (editingField.value && (!editingField.value.id || editingField.value.id <= 0)) {
+    toast.add({
+      title: '无效的字段 ID',
+      description: `字段 ID "${editingField.value.id}" 无效，请刷新页面后重试`,
+      color: 'error',
+    })
+    console.error('[saveField] Invalid field ID:', editingField.value.id)
+    return
+  }
+
   saving.value = true
   try {
-    // 编辑模式：检查字段名称是否变化
+    // 编辑模式：检查字段标签是否变化
     const isLabelChanged = editingField.value &&
       editingField.value.field_label.trim() !== fieldForm.field_label.trim()
 
     let fieldName = editingField.value?.field_name || ''
-    let validationRule = editingField.value?.validation_rule || null
+    let validationRule = editingField.value?.validation_rule
     let extractionHint = editingField.value?.extraction_hint || ''
 
-    // 仅在新增或字段名称变化时调用 AI
+    console.log('[saveField] Starting save...', {
+      isEditing: !!editingField.value,
+      isLabelChanged,
+      fieldName,
+      validationRule,
+      extractionHint
+    })
+
+    // 仅在新增或字段标签变化时调用 AI 翻译
     if (!editingField.value || isLabelChanged) {
-      const aiResult = await fieldsApi.generateMetadata({
-        field_label: fieldForm.field_label,
-        field_type: fieldForm.field_type,
-      })
-      fieldName = aiResult.field_name
-      validationRule = aiResult.validation_rule
-      extractionHint = aiResult.extraction_hint
+      console.log('[saveField] Calling metadata generation...')
+      // 尝试使用 AI 翻译字段名
+      if (configStore.defaultConfig) {
+        try {
+          console.log('[saveField] Using AI translation with config:', configStore.defaultConfig.id)
+          const aiResult = await aiServiceApi.generateFieldMetadataWithAI(
+            configStore.defaultConfig.id,
+            fieldForm.field_label,
+            fieldForm.field_type
+          )
+          console.log('[saveField] AI result:', aiResult)
+          fieldName = aiResult.field_name || generateFallbackFieldName(fieldForm.field_label)
+          validationRule = aiResult.validation_rule || null
+          extractionHint = aiResult.extraction_hint || `提取${fieldForm.field_label.trim()}字段`
+        } catch (aiError) {
+          console.warn('[saveField] AI 翻译失败，使用本地生成:', aiError)
+          // AI 失败时使用本地生成
+          const localResult = await fieldsApi.generateMetadata({
+            field_label: fieldForm.field_label,
+            field_type: fieldForm.field_type,
+          })
+          fieldName = localResult.field_name || generateFallbackFieldName(fieldForm.field_label)
+          validationRule = localResult.validation_rule || null
+          extractionHint = localResult.extraction_hint || `提取${fieldForm.field_label.trim()}字段`
+        }
+      } else {
+        console.log('[saveField] No AI config, using local generation')
+        // 没有 AI 配置时使用本地生成
+        const localResult = await fieldsApi.generateMetadata({
+          field_label: fieldForm.field_label,
+          field_type: fieldForm.field_type,
+        })
+        fieldName = localResult.field_name || generateFallbackFieldName(fieldForm.field_label)
+        validationRule = localResult.validation_rule || null
+        extractionHint = localResult.extraction_hint || `提取${fieldForm.field_label.trim()}字段`
+      }
     }
 
+    // 确保 fieldName 不为空
+    if (!fieldName || !fieldName.trim()) {
+      fieldName = generateFallbackFieldName(fieldForm.field_label)
+    }
+
+    console.log('[saveField] Final values:', {
+      fieldName,
+      validationRule,
+      extractionHint,
+      projectId: projectId.value
+    })
+
     if (editingField.value) {
+      console.log('[saveField] Calling updateField with id:', editingField.value.id)
       await fieldStore.updateField(editingField.value.id, {
         field_label: fieldForm.field_label.trim(),
         field_type: fieldForm.field_type,
@@ -259,6 +322,7 @@ async function saveField() {
       })
       toast.add({ title: '字段已更新', color: 'success' })
     } else {
+      console.log('[saveField] Calling createField with project_id:', projectId.value)
       await fieldStore.createField({
         project_id: projectId.value,
         field_label: fieldForm.field_label.trim(),
@@ -300,13 +364,49 @@ async function deleteField() {
 
   deleting.value = true
   try {
+    console.log('[deleteField] Deleting field id:', fieldToDelete.value.id)
     await fieldStore.deleteField(fieldToDelete.value.id)
     showDeleteModal.value = false
     fieldToDelete.value = null
-  } catch (error) {
+    toast.add({ title: '字段已删除', color: 'success' })
+  } catch (error: any) {
     console.error('Failed to delete field:', error)
+    toast.add({
+      title: '删除失败',
+      description: error?.message || String(error),
+      color: 'error',
+    })
   } finally {
     deleting.value = false
   }
 }
+
+// 生成本地备用字段名
+function generateFallbackFieldName(label: string): string {
+  const mappings: Record<string, string> = {
+    '姓名': 'name', '名字': 'name', '电话': 'phone', '手机': 'phone',
+    '手机号': 'phone', '邮箱': 'email', '地址': 'address', '公司': 'company',
+    '日期': 'date', '金额': 'amount', '价格': 'price', '数量': 'quantity',
+    '备注': 'remark', '标题': 'title', '编号': 'id', '状态': 'status',
+  }
+
+  const trimmed = label.trim()
+  if (mappings[trimmed]) {
+    return mappings[trimmed]
+  }
+
+  for (const [cn, en] of Object.entries(mappings)) {
+    if (trimmed.includes(cn)) {
+      return en
+    }
+  }
+
+  return trimmed.toLowerCase().replace(/\s+/g, '_').replace(/[^a-z0-9_]/g, '') || 'field'
+}
+
+// 初始化
+onMounted(async () => {
+  await fieldStore.fetchFields(projectId.value)
+  await configStore.fetchConfigs()
+})
 </script>

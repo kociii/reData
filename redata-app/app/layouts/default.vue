@@ -5,9 +5,7 @@
       <div class="px-6 h-14 flex items-center justify-between">
         <!-- 左侧：Logo + 标题 -->
         <div class="flex items-center gap-2">
-          <div class="w-8 h-8 bg-primary-500 rounded-lg flex items-center justify-center">
-            <UIcon name="i-lucide-cube" class="w-5 h-5 text-white" />
-          </div>
+          <img src="/logo.png" alt="reData Logo" class="w-8 h-8 rounded-lg" />
           <span class="text-lg font-bold text-gray-900 dark:text-white">reData</span>
         </div>
 
@@ -113,23 +111,13 @@
             <span>记录数: 0</span>
           </template>
         </div>
-        <div class="flex items-center gap-3">
-          <span v-if="!backendConnected" class="text-yellow-600 dark:text-yellow-400 flex items-center gap-1">
-            <UIcon name="i-lucide-circle-alert" class="w-3 h-3" />
-            后端未连接
-          </span>
-          <span v-else class="text-green-600 dark:text-green-400 flex items-center gap-1">
-            <UIcon name="i-lucide-circle-check" class="w-3 h-3" />
-            后端已连接
-          </span>
-        </div>
       </div>
     </footer>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, ref, onMounted, onUnmounted, watch } from 'vue'
+import { computed, onMounted, watch } from 'vue'
 import { useProjectStore } from '~/stores/project'
 import { useTabStore } from '~/stores/tab'
 import type { AppTab } from '~/types'
@@ -138,8 +126,6 @@ const projectStore = useProjectStore()
 const tabStore = useTabStore()
 const router = useRouter()
 const route = useRoute()
-
-const backendConnected = ref(false)
 
 // 计算属性
 const isProjectPage = computed(() => route.path.startsWith('/project/'))
@@ -214,38 +200,17 @@ watch(
   }
 )
 
-// 检查后端连接
-async function checkBackendConnection() {
-  try {
-    const response = await fetch('http://127.0.0.1:8000/api/projects/')
-    backendConnected.value = response.ok
-  } catch {
-    backendConnected.value = false
-  }
-}
-
 // 初始化
-let checkInterval: ReturnType<typeof setInterval>
-
 onMounted(async () => {
-  await checkBackendConnection()
-  checkInterval = setInterval(checkBackendConnection, 10000)
+  await projectStore.fetchProjects()
 
-  if (backendConnected.value) {
-    await projectStore.fetchProjects()
-
-    const id = route.params.id
-    if (id) {
-      const numId = Number(id)
-      const project = projectStore.projects.find((p) => p.id === numId)
-      if (project) {
-        projectStore.setCurrentProject(project)
-      }
+  const id = route.params.id
+  if (id) {
+    const numId = Number(id)
+    const project = projectStore.projects.find((p) => p.id === numId)
+    if (project) {
+      projectStore.setCurrentProject(project)
     }
   }
-})
-
-onUnmounted(() => {
-  clearInterval(checkInterval)
 })
 </script>

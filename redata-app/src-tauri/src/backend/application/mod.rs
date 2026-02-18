@@ -4,6 +4,3 @@ pub mod commands;
 pub mod dtos;
 pub mod queries;
 pub mod use_cases;
-
-// 导出常用类型
-pub use dtos::*;

@@ -1,7 +1,7 @@
 // 加密工具模块 - 用于 API 密钥加密
 
 use aes_gcm::{
-    aead::{Aead, KeyInit, OsRng},
+    aead::{Aead, KeyInit},
     Aes256Gcm, Nonce,
 };
 use base64::{engine::general_purpose, Engine as _};

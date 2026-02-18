@@ -10,7 +10,6 @@ use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
 use crate::backend::infrastructure::{
-    config::AppError,
     persistence::models::{project, Project},
 };
 

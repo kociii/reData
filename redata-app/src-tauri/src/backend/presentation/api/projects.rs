@@ -1,5 +1,7 @@
 // 项目 API 路由
+// 注意: 此模块已弃用，现在使用 Tauri Commands 而不是 HTTP API
 
+#[allow(unused_imports)]
 use axum::{
     extract::{Path, State},
     http::StatusCode,
