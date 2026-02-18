@@ -21,6 +21,7 @@ pub struct RecordResponse {
     pub id: i32,
     pub project_id: i32,
     pub data: JsonValue,
+    pub raw_data: Option<JsonValue>,
     pub source_file: Option<String>,
     pub source_sheet: Option<String>,
     pub row_number: Option<i32>,
@@ -43,10 +44,14 @@ impl From<record::Model> for RecordResponse {
     fn from(m: record::Model) -> Self {
         let data: JsonValue = serde_json::from_str(&m.data)
             .unwrap_or(JsonValue::Object(Default::default()));
+        let raw_data: Option<JsonValue> = m.raw_data.and_then(|s| {
+            serde_json::from_str(&s).ok()
+        });
         Self {
             id: m.id,
             project_id: m.project_id,
             data,
+            raw_data,
             source_file: m.source_file,
             source_sheet: m.source_sheet,
             row_number: m.row_number,
@@ -223,10 +228,15 @@ pub async fn query_records(
         let data_str: String = row.try_get_by::<String, _>("data").unwrap_or_default();
         let data: JsonValue = serde_json::from_str(&data_str)
             .unwrap_or(JsonValue::Object(Default::default()));
+        let raw_data_str: Option<String> = row.try_get_by::<Option<String>, _>("raw_data").unwrap_or(None);
+        let raw_data: Option<JsonValue> = raw_data_str.and_then(|s| {
+            serde_json::from_str(&s).ok()
+        });
         RecordResponse {
             id: row.try_get_by::<i32, _>("id").unwrap_or(0),
             project_id: row.try_get_by::<i32, _>("project_id").unwrap_or(0),
             data,
+            raw_data,
             source_file: row.try_get_by::<Option<String>, _>("source_file").unwrap_or(None),
             source_sheet: row.try_get_by::<Option<String>, _>("source_sheet").unwrap_or(None),
             row_number: row.try_get_by::<Option<i32>, _>("row_number").unwrap_or(None),

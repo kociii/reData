@@ -342,12 +342,12 @@
                         :key="colIndex"
                         class="border-b border-default px-2 py-1 text-left text-muted font-medium"
                       >
-                        字段{{ header }}
+                        {{ header }}
                       </th>
                     </tr>
                   </thead>
                   <tbody>
-                    <tr v-for="(row, rowIndex) in rawData.rows" :key="rowIndex" class="hover:bg-elevated/50">
+                    <tr v-for="(row, rowIndex) in rawData.rows.slice(1)" :key="rowIndex" class="hover:bg-elevated/50">
                       <td class="border-b border-default px-2 py-1 text-muted">{{ rowIndex + 1 }}</td>
                       <td
                         v-for="(cell, colIndex) in row"
@@ -664,28 +664,26 @@ async function loadRawData() {
 
     // 提取 raw_data 构建表格数据
     const rows: any[][] = []
-    const sourceFiles = new Set<string>()
     const sourceSheets = new Set<string>()
 
-    // 收集所有字段 ID 作为表头
-    const fieldIds = new Set<string>()
-    response.records.forEach(record => {
-      if (record.data) {
-        Object.keys(record.data).forEach(key => fieldIds.add(key))
-      }
-    })
+    // 使用第一条记录的 raw_data 确定列数
+    const firstRecord = response.records.find(r => r.raw_data && r.raw_data.length > 0)
+    if (!firstRecord?.raw_data) {
+      toast.add({ title: '原始数据为空', color: 'warning' })
+      rawDataLoading.value = false
+      return
+    }
 
-    // 构建表头行（字段 ID）
-    const headerRow = Array.from(fieldIds)
+    // 构建表头行（列索引）
+    const colCount = firstRecord.raw_data.length
+    const headerRow = Array.from({ length: colCount }, (_, i) => String.fromCharCode(65 + i))
     rows.push(headerRow)
 
-    // 构建数据行
+    // 构建数据行（使用 raw_data）
     response.records.forEach(record => {
-      if (record.data) {
-        const row: any[] = headerRow.map(fieldId => record.data[fieldId] ?? '')
-        rows.push(row)
+      if (record.raw_data && record.raw_data.length > 0) {
+        rows.push(record.raw_data)
       }
-      if (record.source_file) sourceFiles.add(record.source_file)
       if (record.source_sheet) sourceSheets.add(record.source_sheet)
     })
 
@@ -693,7 +691,7 @@ async function loadRawData() {
     const sheets = Array.from(sourceSheets).map(name => ({
       name,
       row_count: rows.length - 1,
-      column_count: headerRow.length,
+      column_count: colCount,
     }))
 
     rawData.value = {

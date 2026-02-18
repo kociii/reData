@@ -216,6 +216,7 @@ export interface ProjectRecord {
   id: number
   project_id: number
   data: Record<string, any>  // key 为 field_id 字符串
+  raw_data: any[] | null  // 原始行数据
   source_file: string | null
   source_sheet: string | null
   row_number: number | null
