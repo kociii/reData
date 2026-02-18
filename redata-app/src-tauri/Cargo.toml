@@ -68,6 +68,7 @@ regex = "1"
 # 加密（用于 API 密钥）
 aes-gcm = "0.10"
 base64 = "0.22"
+rand = "0.8"
 
 # 异步 trait
 async-trait = "0.1"

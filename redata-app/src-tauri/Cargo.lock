@@ -3765,6 +3765,7 @@ dependencies = [
  "calamine",
  "chrono",
  "dotenvy",
+ "rand 0.8.5",
  "regex",
  "rust_xlsxwriter",
  "sea-orm",
