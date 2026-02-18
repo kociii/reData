@@ -18,39 +18,11 @@
 
 ## 技术栈
 
-**前端**: Nuxt 4.x + TypeScript + Nuxt UI 4.x
+**前端**: Nuxt 4.x + TypeScript + Nuxt UI 4.x + Pinia
 **桌面框架**: Tauri 2.x
-**后端**:
-- **Python 3.11+ + FastAPI** (生产版本)
-- **Rust + Axum** (新实现，高性能版本) 🚀
+**后端**: Rust + Tauri Commands（零网络开销）🚀
 **数据库**: SQLite 3.40+
 **AI 集成**: OpenAI SDK（支持 GPT-4、Claude、通过 Ollama 的本地模型）
-
-**前端特性**：
-- Nuxt 4.x - 最新版，全栈 Vue 框架
-- Nuxt UI 4.x - 基于 Reka UI 和 Tailwind CSS 的直观 UI 库
-- 自动路由 - 基于文件系统的路由
-- 内置 Pinia - 状态管理
-- TypeScript 支持 - 完整的类型安全
-
-**后端特性**：
-
-**Python + FastAPI**（生产版本）：
-- FastAPI - 现代 Python Web 框架，自动生成 API 文档
-- SQLAlchemy - Python ORM，类型安全的数据库操作
-- pandas + openpyxl - 强大的 Excel 处理能力
-- OpenAI SDK - 官方 AI 集成库
-- uvicorn - 高性能 ASGI 服务器
-
-**Rust + Tauri Commands**（当前架构）🚀：
-- Tauri 2.x - 桌面应用框架
-- Tauri Commands - 零网络开销的前后端通信
-- SeaORM 1.0 - 异步 ORM，支持 SQLite
-- async-openai 0.24 - OpenAI API 客户端
-- calamine + rust_xlsxwriter - Excel 处理
-- tokio - 异步运行时
-- DDD 架构 - 领域驱动设计
-- 性能优势：启动时间 ~1秒，内存占用 ~10MB，零网络延迟
 
 ## 架构
 
@@ -58,404 +30,129 @@
 
 **当前架构：Tauri Commands 模式（零网络开销）** 🚀
 
-应用使用 Tauri Commands 进行前后端通信，实现零网络开销的直接函数调用：
+- **前端 → 后端**: 通过 Tauri `invoke()` 直接调用 Rust Commands
+  - 零网络开销：直接函数调用，无 HTTP 请求
+  - 更快的响应速度：无序列化/反序列化开销
+  - 类型安全：Rust 类型系统保证数据一致性
 
-**前端 → 后端**: 通过 Tauri `invoke()` 直接调用 Rust Commands
-- 零网络开销：直接函数调用，无 HTTP 请求
-- 更快的响应速度：无序列化/反序列化开销
-- 类型安全：Rust 类型系统保证数据一致性
+- **后端 → 前端**: 通过 WebSocket 进行实时进度更新（待实现）
 
-**后端 → 前端**: 通过 WebSocket 进行实时进度更新（待实现）
+### Tauri Commands 实现进度
 
-**历史架构**：
-- ~~Python 后端：http://127.0.0.1:8000~~（已弃用）
-- ~~Rust HTTP 后端：http://127.0.0.1:8001~~（已替换为 Tauri Commands）
+**已实现**：
+- ✅ 项目管理 Commands（`commands/projects.rs`）
+  - get_projects, get_project, create_project, update_project, delete_project
 
-### Tauri Commands（位于 `src-tauri/src/commands/`）
+**待实现**：
+- ⏳ 字段管理 Commands
+- ⏳ AI 配置 Commands
+- ⏳ 文件处理 Commands
+- ⏳ 数据处理 Commands
+- ⏳ 结果查询 Commands
 
-**项目管理 Commands**（`commands/projects.rs`）：
-- `get_projects` - 获取项目列表 ✅
-- `get_project` - 获取单个项目 ✅
-- `create_project` - 创建项目 ✅
-- `update_project` - 更新项目 ✅
-- `delete_project` - 删除项目 ✅
+### 两阶段数据处理方案
 
-**待实现的 Commands**：
-- 字段管理 Commands
-- AI 配置 Commands
-- 文件处理 Commands
-- 数据处理 Commands
-- 结果查询 Commands
+**核心思想**：每 Sheet 仅 1 次 AI 调用，节省 99.9% Token
 
-### API 路由（Python 后端，已弃用）
-
-- `projects.py` - 项目的 CRUD 操作 ✅
-- `fields.py` - 字段定义的 CRUD 操作 ✅
-- `ai_configs.py` - AI 配置的 CRUD 操作 ✅
-- `files.py` - 文件上传、预览、批次管理 ✅
-- `processing.py` - 启动/暂停/恢复/取消处理任务、WebSocket 进度 ✅
-- `results.py` - 查询/更新/导出提取的记录 ✅
-
-### 服务层架构（两阶段处理方案）
-
-**服务**（位于 `backend/src/redata/services/`）：
-
-| 文件 | 功能 | 状态 |
-|------|------|------|
-| `ai_client.py` | AI 列映射分析、字段元数据生成 | ✅ |
-| `validator.py` | 本地格式验证、数据标准化 | ✅ |
-| `excel_parser.py` | Excel 读取、按列索引读取 | ✅ |
-| `storage.py` | 动态表管理、去重处理 | ✅ |
-| `extractor.py` | 两阶段处理协调器 | ✅ |
-
-**两阶段处理流程**：
-
-**阶段一：AI 列映射分析（每 Sheet 仅 1 次 AI 调用）**
+**阶段一：AI 列映射分析**
 1. 读取前 10 行样本数据
 2. AI 识别表头位置（第 1-10 行，或无表头）
 3. AI 分析每一列与项目字段的匹配关系
 4. 返回列映射和置信度
 
-**阶段二：本地验证导入（无 AI 调用）**
+**阶段二：本地验证导入**
 1. 根据列映射直接读取对应列
-2. 使用格式验证规则检查数据
+2. 使用格式验证规则检查数据（正则表达式）
 3. 逐行导入到数据库
-
-**Token 节省对比**：
-- 旧方案：1 个 Sheet 有 1000 行 = 1000 次 AI 调用
-- 新方案：1 个 Sheet = 1 次 AI 调用
-- **节省 99.9% 的 AI 调用**
-
-### 状态管理（Pinia）
-
-**主要 store**：
-- `projectStore` - 项目列表、当前项目、项目 CRUD
-- `fieldStore` - 字段定义、字段编辑
-- `processingStore` - 活动任务、进度、选中的任务
-- `resultStore` - 提取的记录、分页、筛选器
-- `configStore` - AI 配置、默认配置
-- `tabStore` - 全局标签页状态管理
-
-### 实时进度更新
-
-使用 WebSocket：
-
-```python
-# 后端发送进度事件（FastAPI）
-await manager.broadcast(task_id, {
-    "event": "row_processed",
-    "current_row": 100,
-    "total_rows": 500,
-    "success_count": 95,
-    "error_count": 5
-})
-```
-
-```typescript
-// 前端监听并更新 UI
-const ws = new WebSocket('ws://127.0.0.1:8000/api/processing/ws/progress/{task_id}')
-ws.onmessage = (event) => {
-  const progress = JSON.parse(event.data)
-  processingStore.updateProgress(progress)
-}
-```
 
 ## 数据库架构
 
 **核心表**：
-
-1. **projects** - 项目表，包含项目名称、描述、去重配置
-2. **project_fields** - 项目字段定义表，包含字段名、显示名称、类型、验证规则、AI 提取提示
-3. **project_{id}_records** - 动态创建的项目数据表，每个项目一个独立的表，表结构根据项目字段定义动态生成
-4. **processing_tasks** - 任务跟踪，UUID 主键，状态枚举（pending/processing/paused/completed/cancelled）
-5. **ai_configs** - AI 模型配置，加密的 API 密钥，is_default 标志
-6. **batches** - 批次统计（batch_001、batch_002...）
+1. **projects** - 项目表（名称、描述、去重配置）
+2. **project_fields** - 字段定义表（字段名、类型、验证规则、AI 提示）
+3. **project_{id}_records** - 动态创建的项目数据表（每个项目独立）
+4. **processing_tasks** - 任务跟踪（UUID、状态枚举）
+5. **ai_configs** - AI 配置（加密的 API 密钥）
+6. **batches** - 批次统计
 
 **关键特性**：
-- 每个项目创建独立的数据表（`project_{id}_records`）
-- 表结构根据项目字段定义动态生成
+- 每个项目创建独立的数据表，表结构根据字段定义动态生成
 - 支持动态添加/删除字段（ALTER TABLE 或重建表）
-- 根据项目去重配置创建相应的 UNIQUE 索引
-
-**关键索引**：
-- 项目数据表根据去重配置动态创建索引
-- `idx_task_status` on processing_tasks(status) - 活动任务查询
-- `idx_project_id` on project_fields(project_id) - 字段查询
+- 根据去重配置创建 UNIQUE 索引
 
 ## 开发命令
 
-### 初始设置
+### 快速开始
 
 ```bash
-# 安装前端依赖
+# 安装依赖
+cd redata-app
 npm install
 
-# 安装后端依赖
-cd backend
-uv sync
-cd ..
-```
-
-### 开发
-
-```bash
-# 启动 Python 后端服务器
-cd backend
-uv run python run.py
-
-# 启动 Rust 后端服务器（推荐）🚀
-cd redata-app/src-tauri
-cargo run --bin server
-
-# 启动前端开发服务器（另一个终端）
-npm run dev
-
-# 启动 Tauri 开发模式（集成 Rust 后端）
+# 启动 Tauri 开发模式（推荐）🚀
 npm run tauri:dev
 
 # 生产构建
 npm run tauri:build
 ```
 
-### API 文档
-
-后端 API 文档自动生成：
-- Swagger UI: http://127.0.0.1:8000/docs
-- ReDoc: http://127.0.0.1:8000/redoc
-
 ### 数据库
 
-数据库文件位置：`backend/data/app.db`
-首次运行时自动创建。
-
-开发期间重置数据库：删除 `backend/data/app.db` 并重启后端服务器。
-
-## 关键实现模式
-
-### 两阶段数据处理（高效模式）
-
-```python
-# 阶段一：AI 列映射分析（每 Sheet 仅 1 次）
-mapping = await ai_client.analyze_column_mapping(
-    sample_rows=sample_rows,  # 前 10 行
-    fields=project_fields
-)
-# 返回: {header_row: 1, column_mappings: {0: "name", 2: "phone"}, confidence: 0.95}
-
-# 阶段二：本地验证导入（无 AI 调用）
-for row_num, row_data in parser.iterate_rows(sheet, start_row):
-    record = {field_name: row_data[col_idx] for col_idx, field_name in mapping.column_mappings.items()}
-    is_valid, errors = validator.validate_record(record, fields)
-    if is_valid:
-        storage.insert_record(project_id, record, meta)
-```
-
-### 本地格式验证
-
-```python
-class DataValidator:
-    VALIDATORS = {
-        "phone": r"^1[3-9]\d{9}$",           # 11位手机号
-        "email": r"^[\w\.-]+@[\w\.-]+\.\w+$", # 邮箱
-        "url": r"^https?://",                # URL
-        "date": r"^\d{4}[-/]\d{1,2}[-/]\d{1,2}$",  # 日期
-    }
-
-    def validate(self, value, field):
-        # 必填检查
-        if field.is_required and not value:
-            return False, "必填字段不能为空"
-        # 类型验证
-        if field.field_type in self.VALIDATORS:
-            if not re.match(self.VALIDATORS[field.field_type], str(value)):
-                return False, f"格式不正确"
-        return True, None
-```
-
-### 去重处理
-
-```python
-# 根据项目去重配置动态处理
-if project.dedup_enabled:
-    existing_id = storage.handle_dedup(project, data)
-    if existing_id:
-        if project.dedup_strategy == "skip":
-            return  # 跳过重复
-        elif project.dedup_strategy == "update":
-            storage.update_record(project_id, existing_id, data)
-    else:
-        storage.insert_record(project_id, data, meta)
-```
-
-### 暂停/恢复机制
-
-```python
-class Extractor:
-    def __init__(self):
-        self.paused = False
-        self.cancelled = False
-
-    async def process_sheet(self):
-        for row in rows:
-            while self.paused:
-                await asyncio.sleep(0.1)
-            if self.cancelled:
-                break
-            # 处理行...
-```
-
-## 文件组织
-
-### 前端结构
-
-- `app/pages/` - 页面组件（Nuxt 4 自动路由）
-  - `index.vue` - 项目列表页（首页）
-  - `project/[id].vue` - 项目详情页
-  - `project/[id]/fields.vue` - 字段定义页（AI 辅助字段生成）
-  - `project/[id]/processing.vue` - 数据处理页
-  - `project/[id]/results.vue` - 结果展示页（固定表头、50条/页）
-  - `project/[id]/settings.vue` - 项目设置页
-  - `settings.vue` - 设置页（AI 配置管理）
-- `components/` - 可复用组件
-- `stores/` - Pinia stores
-- `types/` - TypeScript 类型定义
-- `utils/` - 工具函数（API 客户端）
-
-### 后端结构
-
-**Python 后端**（位于 `backend/src/redata/`）：
-
-- `backend/src/redata/api/` - API 路由（FastAPI）✅
-  - `projects.py` - 项目管理
-  - `fields.py` - 字段定义
-  - `files.py` - 文件操作
-  - `processing.py` - 数据处理
-  - `ai_configs.py` - AI 配置
-  - `results.py` - 结果查询
-- `backend/src/redata/services/` - 业务逻辑 ✅
-  - `ai_client.py` - AI 客户端（列映射分析）
-  - `validator.py` - 数据验证器
-  - `excel_parser.py` - Excel 解析
-  - `extractor.py` - 数据提取协调器
-  - `storage.py` - 数据存储（动态表管理）
-- `backend/src/redata/models/` - 数据模型
-- `backend/src/redata/db/` - 数据库配置
-
-**Rust 后端**（位于 `src-tauri/src/backend/`）🚀：
-
-采用 DDD（领域驱动设计）架构：
-
-- `domain/` - 领域层（核心业务逻辑）
-  - `entities/` - 实体
-  - `value_objects/` - 值对象
-  - `repositories/` - 仓储接口
-  - `services/` - 领域服务
-  - `events/` - 领域事件
-- `application/` - 应用层（用例编排）
-  - `use_cases/` - 用例
-  - `dtos/` - 数据传输对象
-  - `commands/` - 命令（写操作）
-  - `queries/` - 查询（读操作）
-- `infrastructure/` - 基础设施层（技术实现）
-  - `persistence/` - 持久化
-    - `database.rs` - 数据库连接 ✅
-    - `migrations.rs` - 数据库迁移 ✅
-    - `models/` - ORM 模型 ✅
-    - `repositories/` - 仓储实现
-  - `external_services/` - 外部服务
-  - `config/` - 配置
-    - `error.rs` - 错误处理 ✅
-    - `logging.rs` - 日志系统 ✅
-    - `crypto.rs` - 加密工具 ✅
-- `presentation/` - 表现层（API 接口）
-  - `api/` - API 路由
-    - `projects.rs` - 项目 API ✅
-    - `fields.rs` - 字段 API（待实现）
-    - `ai_configs.rs` - AI 配置 API（待实现）
-    - `files.rs` - 文件 API（待实现）
-    - `processing.rs` - 处理任务 API（待实现）
-    - `results.rs` - 结果 API（待实现）
-  - `middleware/` - 中间件
-    - `cors.rs` - CORS 配置 ✅
-    - `logging.rs` - 日志中间件 ✅
-
-**Rust 后端实现进度**：
-- ✅ Phase 1: 基础架构搭建
-- ✅ Phase 2: 数据库层实现（包括迁移）
-- ✅ Phase 3: 项目管理 API（完整 CRUD）
-- ⏳ Phase 4-9: 其他 API 端点（待实现）
-
-### 数据目录
-
-- `history/batch_XXX/` - 复制的 Excel 文件（保留原始文件，实现可追溯性）
-- `backend/data/app.db` - SQLite 数据库文件
+- 数据库文件：`redata-app/src-tauri/data/app.db`
+- 首次运行时自动创建
+- 重置数据库：删除 `data/app.db` 并重启应用
 
 ## 重要约定
 
 ### 批次处理
-
 - 处理前文件被复制到 `history/batch_XXX/`（批次号自动递增）
-- 原始文件保持不变
-- 每个批次都有唯一标识符以实现可追溯性
+- 原始文件保持不变，实现可追溯性
 
 ### 错误处理
-
 - 失败的行会被记录但不会停止处理
-- 错误消息存储在项目数据表的 `error_message` 字段
+- 错误消息存储在 `error_message` 字段
 - AI API 失败会触发自动重试（最多 3 次）
 
 ### 空行检测
-
-- 维护连续空行计数器
 - 连续 10 个空行后跳到下一个 sheet
 - 遇到非空行时计数器重置
 
 ### 多 Sheet 处理
-
 - 每个 sheet 独立进行表头识别
-- **如果有表头**：从表头行 + 1 开始处理，使用"表头:值"格式
-- **如果无表头**：从第 1 行开始处理，直接提交原始数据给 AI
+- **有表头**：从表头行 + 1 开始处理
+- **无表头**：从第 1 行开始处理
 - Sheet 名称记录在 `source_sheet` 字段
-- 文件内的所有 sheet 按顺序处理
 
-## 文档
+## 文件组织
 
-`prd/` 目录中的完整文档（v2.4.0）：
-- `prd.md` - 产品需求和业务逻辑（两阶段处理方案）
-- `design.md` - UI/UX 设计及 ASCII 图表
-- `plan.md` - 实施计划（10 个阶段，当前进度 10/10）
-- `dev.md` - 技术细节和架构（两阶段处理实现）
-- `README.md` - 文档索引
+### 前端（`redata-app/app/`）
+- `pages/` - 页面组件（Nuxt 自动路由）
+  - `index.vue` - 项目列表页
+  - `project/[id]/fields.vue` - 字段定义页
+  - `project/[id]/processing.vue` - 数据处理页
+  - `project/[id]/results.vue` - 结果展示页
+  - `project/[id]/settings.vue` - 项目设置页
+  - `settings.vue` - AI 配置管理页
+- `stores/` - Pinia 状态管理（projectStore, fieldStore, processingStore, resultStore, configStore, tabStore）
+- `utils/api.ts` - API 客户端（使用 Tauri invoke）
 
-**开发进度**：
-- ✅ Phase 1: 项目初始化（Nuxt 4 + Tauri 2）
-- ✅ Phase 2: 数据库和基础服务（Python FastAPI）
-- ✅ Phase 3: AI 集成和 Excel 解析（两阶段处理方案）
-- ✅ Phase 4: 前端基础架构（布局、API 客户端、状态管理）
-- ✅ Phase 5: 前端 - 项目管理（项目列表、创建、切换）
-- ✅ Phase 6: 前端 - 字段定义（AI 辅助字段生成工作流）
-- ✅ Phase 7: 前端 - 处理界面（文件处理、进度显示）
-- ✅ Phase 8: 前端 - 结果页面（数据展示、编辑、导出）
-- ✅ Phase 9: UI 优化（全局标签页、卡片布局、固定表头）
-- ✅ Phase 10: 后端 API 集成（AI 字段生成接口）
+### 后端（`redata-app/src-tauri/src/`）
+- `commands/` - Tauri Commands（前端调用入口）
+  - `projects.rs` - 项目管理 Commands ✅
+- `backend/` - 核心业务逻辑（DDD 架构）
+  - `domain/` - 领域层（实体、值对象、仓储接口）
+  - `application/` - 应用层（用例、DTO）
+  - `infrastructure/` - 基础设施层（数据库、加密、日志）
+  - `presentation/` - 表现层（HTTP API，已弃用）
 
-**v2.4.0 重要变更**：
-- 完成所有 10 个开发阶段
-- 新增全局标签页功能（浏览器式体验）
-- AI 辅助字段定义：自动生成英文字段名、验证规则、提取提示
-- 优化 UI：项目卡片弹性布局、结果页面固定表头（50条/页）
-- 新增 `tab.ts` 标签页状态管理
-- 数据库新增 `additional_requirement` 字段
-
-**v2.3.0 重要变更**：
-- 采用"AI 列映射分析 + 本地验证导入"的两阶段处理
-- 每 Sheet 仅 1 次 AI 调用，节省 99.9% 的 Token 消耗
-- 新增 `validator.py` 本地数据验证器
+### Python 后端（已弃用）
+- `redata-app/backend/` - Python FastAPI 后端（保留用于参考）
+  - `src/redata/services/` - 业务逻辑（ai_client, validator, excel_parser, extractor, storage）
 
 ## 安全考虑
 
-- API 密钥在存储到 `ai_configs` 表之前必须加密
-- 数据库文件（`data/app.db`）保持本地，永不上传到云端
+- API 密钥使用 AES-256-GCM 加密存储
+- 数据库文件保持本地，永不上传到云端
 - 使用参数化查询防止 SQL 注入
 - 验证文件路径以防止目录遍历攻击
 
@@ -463,20 +160,37 @@ class Extractor:
 
 ### WebSocket 连接问题 (v2.4.1)
 
-**问题描述**：
-- 文件导入时 WebSocket 连接错误："WebSocket 连接错误" 和 "已断开任务 ... 的进度流"
+**问题**：文件导入时 WebSocket 连接错误，task_id 为空
 
-**根本原因**：
-- 后端在创建处理任务时，`task_id` 是在后台异步任务中才生成的
-- 导致 API 返回的 `task_id` 为空字符串 `""`
-- 前端无法通过空的 task_id 连接到 WebSocket
+**原因**：后端在后台异步任务中才生成 task_id，导致 API 返回空字符串
 
-**修复方案**：
-- 在 `backend/src/redata/api/processing.py` 的 `start_processing` 函数中，提前生成 `task_id` 和 `batch_number`
-- 确保 API 返回响应时已经包含正确的 task_id
+**修复**：在 `start_processing` 函数中提前生成 task_id 和 batch_number
 
 **相关文件**：
 - `backend/src/redata/api/processing.py` - 修复了 task_id 生成逻辑
 - `backend/src/redata/services/storage.py` - 添加了智能表结构迁移功能
-- `backend/src/redata/models/project.py` - 添加了字段软删除支持 (is_deleted, deleted_at)
-- `backend/migrate_add_soft_delete.py` - 数据库迁移脚本
+- `backend/src/redata/models/project.py` - 添加了字段软删除支持
+
+## 开发进度
+
+**v2.5.0（当前版本）**：
+- ✅ 实现 Tauri Commands 模式（项目管理）
+- ✅ 零网络开销的前后端通信
+- ⏳ 其他功能模块迁移到 Tauri Commands
+
+**v2.4.0**：
+- ✅ 完成所有 10 个开发阶段（Python 后端）
+- ✅ 全局标签页功能
+- ✅ AI 辅助字段定义
+- ✅ UI 优化（卡片布局、固定表头）
+
+**v2.3.0**：
+- ✅ 两阶段处理方案（节省 99.9% Token）
+- ✅ 本地数据验证器
+
+## 文档
+
+- [README.md](README.md) - 项目说明
+- [DDD_ARCHITECTURE.md](redata-app/backend/DDD_ARCHITECTURE.md) - DDD 架构设计
+- [RUST_MIGRATION_PLAN.md](redata-app/backend/RUST_MIGRATION_PLAN.md) - Rust 迁移计划
+- `prd/` 目录 - 完整的产品需求和设计文档
