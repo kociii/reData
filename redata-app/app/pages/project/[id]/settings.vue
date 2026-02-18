@@ -24,64 +24,6 @@
       </div>
     </div>
 
-    <!-- 字段定义摘要 -->
-    <div class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700">
-      <div class="px-4 py-3 border-b border-gray-200 dark:border-gray-700 flex justify-between items-center">
-        <h3 class="text-base font-medium text-gray-900 dark:text-white">字段定义</h3>
-        <UButton size="xs" variant="soft" :to="`/project/${projectId}/fields`">
-          编辑字段定义
-        </UButton>
-      </div>
-      <div class="p-4">
-        <div v-if="fieldStore.fieldCount === 0" class="text-sm text-gray-500 dark:text-gray-400">
-          尚未定义字段，请先添加字段定义。
-        </div>
-        <ul v-else class="space-y-1.5">
-          <li v-for="field in fieldStore.fields" :key="field.id" class="flex items-center gap-2 text-sm">
-            <UBadge v-if="field.is_required" color="error" variant="subtle" size="xs">必填</UBadge>
-            <span class="text-gray-900 dark:text-white">{{ field.field_label }}</span>
-            <span class="text-gray-400">-</span>
-            <span class="text-gray-500 dark:text-gray-400">{{ field.extraction_hint || field.field_type }}</span>
-          </li>
-        </ul>
-        <p class="text-xs text-gray-400 mt-3">当前定义了 {{ fieldStore.fieldCount }} 个字段</p>
-      </div>
-    </div>
-
-    <!-- 去重配置 -->
-    <div class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700">
-      <div class="px-4 py-3 border-b border-gray-200 dark:border-gray-700">
-        <h3 class="text-base font-medium text-gray-900 dark:text-white">去重配置</h3>
-      </div>
-      <div class="p-4 space-y-4">
-        <USwitch v-model="dedupForm.enabled" label="启用去重" />
-        <div v-if="dedupForm.enabled" class="space-y-3">
-          <UFormField label="去重字段">
-            <div class="flex flex-wrap gap-2">
-              <UCheckbox
-                v-for="field in fieldStore.fields"
-                :key="field.id"
-                :model-value="dedupForm.fields.includes(field.field_name)"
-                :label="field.field_label"
-                @update:model-value="toggleDedupField(field.field_name, $event)"
-              />
-            </div>
-          </UFormField>
-          <UFormField label="去重策略">
-            <URadioGroup
-              v-model="dedupForm.strategy"
-              :items="[
-                { value: 'skip', label: '跳过重复' },
-                { value: 'update', label: '更新已存在' },
-                { value: 'merge', label: '保留标记' },
-              ]"
-            />
-          </UFormField>
-        </div>
-        <UButton :loading="savingDedup" @click="saveDedupConfig">保存配置</UButton>
-      </div>
-    </div>
-
     <!-- 数据统计 -->
     <div class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700">
       <div class="px-4 py-3 border-b border-gray-200 dark:border-gray-700">
@@ -125,28 +67,22 @@
 import { ref, reactive, computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useProjectStore } from '~/stores/project'
-import { useFieldStore } from '~/stores/field'
 
 const route = useRoute()
 const router = useRouter()
 const projectStore = useProjectStore()
-const fieldStore = useFieldStore()
 
 const projectId = computed(() => Number(route.params.id))
 const project = computed(() => projectStore.currentProject)
 
 const saving = ref(false)
-const savingDedup = ref(false)
 
 const editForm = reactive({ name: '', description: '' })
-const dedupForm = reactive({ enabled: true, strategy: 'skip', fields: [] as string[] })
 
 onMounted(() => {
   if (project.value) {
     editForm.name = project.value.name
     editForm.description = project.value.description || ''
-    dedupForm.enabled = project.value.dedup_enabled
-    dedupForm.strategy = project.value.dedup_strategy || 'skip'
   }
 })
 
@@ -168,28 +104,6 @@ async function saveBasicInfo() {
     console.error('Failed to save:', error)
   } finally {
     saving.value = false
-  }
-}
-
-function toggleDedupField(fieldName: string, checked: boolean) {
-  if (checked) {
-    dedupForm.fields.push(fieldName)
-  } else {
-    dedupForm.fields = dedupForm.fields.filter(f => f !== fieldName)
-  }
-}
-
-async function saveDedupConfig() {
-  savingDedup.value = true
-  try {
-    await projectStore.updateProject(projectId.value, {
-      dedup_enabled: dedupForm.enabled,
-      dedup_strategy: dedupForm.strategy,
-    })
-  } catch (error) {
-    console.error('Failed to save dedup config:', error)
-  } finally {
-    savingDedup.value = false
   }
 }
 

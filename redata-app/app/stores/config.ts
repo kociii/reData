@@ -107,7 +107,7 @@ export const useConfigStore = defineStore('config', () => {
     }
   }
 
-  async function testConnection(id: number): Promise<{ success: boolean; message: string }> {
+  async function testConnection(id: number): Promise<{ success: boolean; message: string; response?: string }> {
     loading.value = true
     error.value = null
     try {
@@ -115,7 +115,7 @@ export const useConfigStore = defineStore('config', () => {
     } catch (e: any) {
       error.value = e.message
       console.error('Failed to test connection:', e)
-      return { success: false, message: e.message }
+      return { success: false, message: e.message, response: '' }
     } finally {
       loading.value = false
     }

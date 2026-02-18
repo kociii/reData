@@ -91,10 +91,9 @@
           <UFormField label="项目描述" name="description">
             <UTextarea v-model="form.description" placeholder="可选的项目描述" :rows="3" />
           </UFormField>
-          <USwitch v-model="form.dedup_enabled" label="启用去重" />
-          <UFormField v-if="form.dedup_enabled" label="去重策略" name="dedup_strategy">
-            <URadioGroup v-model="form.dedup_strategy" :items="[{ value: 'skip', label: '跳过重复' }, { value: 'update', label: '更新记录' }, { value: 'merge', label: '合并数据' }]" />
-          </UFormField>
+          <p class="text-sm text-gray-500 dark:text-gray-400">
+            去重配置可在字段定义中设置（每个字段可单独设置是否参与去重）
+          </p>
         </UForm>
       </template>
       <template #footer>
@@ -136,7 +135,7 @@ const router = useRouter()
 const backendError = ref(false)
 const showCreateModal = ref(false)
 const creating = ref(false)
-const form = reactive({ name: '', description: '', dedup_enabled: true, dedup_strategy: 'skip' })
+const form = reactive({ name: '', description: '' })
 const showDeleteModal = ref(false)
 const projectToDelete = ref<Project | null>(null)
 const deleting = ref(false)
@@ -202,8 +201,6 @@ async function createProject() {
     const project = await projectStore.createProject({
       name: form.name.trim(),
       description: form.description.trim() || undefined,
-      dedup_enabled: form.dedup_enabled,
-      dedup_strategy: form.dedup_strategy,
     })
     showCreateModal.value = false
     resetForm()
@@ -236,8 +233,6 @@ async function deleteProject() {
 function resetForm() {
   form.name = ''
   form.description = ''
-  form.dedup_enabled = true
-  form.dedup_strategy = 'skip'
 }
 
 function formatDate(dateStr: string): string {

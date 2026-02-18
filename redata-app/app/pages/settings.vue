@@ -49,7 +49,7 @@
                 </UBadge>
               </div>
               <div class="text-sm text-gray-500 dark:text-gray-400">
-                {{ config.model }} · {{ config.base_url || '默认端点' }}
+                {{ config.model_name }} · {{ config.api_url || '默认端点' }}
               </div>
             </div>
           </div>
@@ -143,12 +143,12 @@
             <UInput v-model="configForm.name" placeholder="例如：GPT-4o" class="w-full" />
           </UFormField>
 
-          <UFormField label="模型 (Model)" name="model" required>
-            <UInput v-model="configForm.model" placeholder="例如：gpt-4o, claude-3-sonnet..." class="w-full" />
+          <UFormField label="模型 (Model)" name="model_name" required>
+            <UInput v-model="configForm.model_name" placeholder="例如：gpt-4o, claude-3-sonnet..." class="w-full" />
           </UFormField>
 
-          <UFormField label="Base URL" name="base_url" required>
-            <UInput v-model="configForm.base_url" placeholder="https://api.openai.com/v1" class="w-full" />
+          <UFormField label="API URL" name="api_url" required>
+            <UInput v-model="configForm.api_url" placeholder="https://api.openai.com/v1" class="w-full" />
           </UFormField>
 
           <UFormField label="API Key" name="api_key" required>
@@ -201,6 +201,7 @@ definePageMeta({
   layout: 'default',
 })
 
+const toast = useToast()
 const configStore = useConfigStore()
 
 // 应用设置
@@ -215,9 +216,9 @@ const editingConfig = ref<AiConfig | null>(null)
 const saving = ref(false)
 const configForm = reactive({
   name: '',
-  model: '',
+  model_name: '',
   api_key: '',
-  base_url: '',
+  api_url: '',
   is_default: false,
 })
 
@@ -233,9 +234,9 @@ const deleting = ref(false)
 function editConfig(config: AiConfig) {
   editingConfig.value = config
   configForm.name = config.name
-  configForm.model = config.model || ''
+  configForm.model_name = config.model_name || ''
   configForm.api_key = ''
-  configForm.base_url = config.base_url || ''
+  configForm.api_url = config.api_url || ''
   configForm.is_default = config.is_default
   showCreateModal.value = true
 }
@@ -245,38 +246,41 @@ function closeModal() {
   showCreateModal.value = false
   editingConfig.value = null
   configForm.name = ''
-  configForm.model = ''
+  configForm.model_name = ''
   configForm.api_key = ''
-  configForm.base_url = ''
+  configForm.api_url = ''
   configForm.is_default = false
 }
 
 // 保存配置
 async function saveConfig() {
-  if (!configForm.name.trim() || !configForm.model.trim()) return
+  if (!configForm.name.trim() || !configForm.model_name.trim()) return
 
   saving.value = true
   try {
     if (editingConfig.value) {
       await configStore.updateConfig(editingConfig.value.id, {
         name: configForm.name.trim(),
-        model: configForm.model.trim(),
+        model_name: configForm.model_name.trim(),
         api_key: configForm.api_key.trim() || undefined,
-        base_url: configForm.base_url.trim() || undefined,
+        api_url: configForm.api_url.trim() || undefined,
         is_default: configForm.is_default,
       })
+      toast.add({ title: '配置已更新', color: 'success' })
     } else {
       await configStore.createConfig({
         name: configForm.name.trim(),
-        model: configForm.model.trim(),
+        model_name: configForm.model_name.trim(),
         api_key: configForm.api_key.trim(),
-        base_url: configForm.base_url.trim() || undefined,
+        api_url: configForm.api_url.trim() || undefined,
         is_default: configForm.is_default,
       })
+      toast.add({ title: '配置已创建', color: 'success' })
     }
     closeModal()
   } catch (error) {
     console.error('Failed to save config:', error)
+    toast.add({ title: '保存失败', description: String(error), color: 'error' })
   } finally {
     saving.value = false
   }
@@ -288,12 +292,25 @@ async function testConfig(id: number) {
   try {
     const result = await configStore.testConnection(id)
     if (result.success) {
-      alert('连接成功！')
+      toast.add({
+        title: '连接成功',
+        description: result.response ? `AI 响应: ${result.response}` : 'AI 配置连接测试通过',
+        color: 'success',
+      })
     } else {
-      alert(`连接失败：${result.message}`)
+      toast.add({
+        title: '连接失败',
+        description: result.message,
+        color: 'error',
+      })
     }
   } catch (error) {
     console.error('Failed to test config:', error)
+    toast.add({
+      title: '连接失败',
+      description: '请检查网络连接和配置',
+      color: 'error',
+    })
   } finally {
     testingId.value = null
   }
@@ -303,8 +320,10 @@ async function testConfig(id: number) {
 async function setDefaultConfig(id: number) {
   try {
     await configStore.setDefault(id)
+    toast.add({ title: '已设为默认配置', color: 'success' })
   } catch (error) {
     console.error('Failed to set default config:', error)
+    toast.add({ title: '设置失败', color: 'error' })
   }
 }
 
@@ -321,10 +340,12 @@ async function deleteConfig() {
   deleting.value = true
   try {
     await configStore.deleteConfig(configToDelete.value.id)
+    toast.add({ title: '配置已删除', color: 'success' })
     showDeleteModal.value = false
     configToDelete.value = null
   } catch (error) {
     console.error('Failed to delete config:', error)
+    toast.add({ title: '删除失败', color: 'error' })
   } finally {
     deleting.value = false
   }

@@ -12,7 +12,14 @@ app = FastAPI(
 # CORS 配置（允许 Tauri 前端访问）
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "tauri://localhost", "http://127.0.0.1:3000"],
+    allow_origins=[
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+        "tauri://localhost",
+        "https://tauri.localhost",
+        "http://tauri.localhost",
+        "https://localhost",  # Tauri 2.x dev mode
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

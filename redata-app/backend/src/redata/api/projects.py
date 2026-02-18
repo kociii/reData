@@ -4,6 +4,7 @@ from typing import List
 from ..db.base import get_db
 from ..models.project import Project
 from ..models.schemas import ProjectCreate, ProjectUpdate, ProjectResponse
+from ..services.storage import StorageService
 
 router = APIRouter()
 
@@ -14,11 +15,16 @@ def create_project(project: ProjectCreate, db: Session = Depends(get_db)):
     existing = db.query(Project).filter(Project.name == project.name).first()
     if existing:
         raise HTTPException(status_code=400, detail="项目名称已存在")
-    
+
     db_project = Project(**project.model_dump())
     db.add(db_project)
     db.commit()
     db.refresh(db_project)
+
+    # 创建项目对应的数据表（包含所有字段）
+    storage = StorageService(db)
+    storage.create_project_table(db_project.id, [])
+
     return db_project
 
 @router.get("/", response_model=List[ProjectResponse])
@@ -55,7 +61,16 @@ def delete_project(project_id: int, db: Session = Depends(get_db)):
     db_project = db.query(Project).filter(Project.id == project_id).first()
     if not db_project:
         raise HTTPException(status_code=404, detail="项目不存在")
-    
+
+    # 删除项目对应的数据表
+    storage = StorageService(db)
+    if storage.table_exists(project_id):
+        storage.drop_project_table(project_id)
+
+    # 删除项目关联的字段（级联删除）
+    from ..models.project import ProjectField
+    db.query(ProjectField).filter(ProjectField.project_id == project_id).delete()
+
     db.delete(db_project)
     db.commit()
     return {"message": "项目已删除"}

@@ -72,7 +72,7 @@
               :key="field.id"
               class="px-4 py-2.5 text-sm text-gray-900 dark:text-white"
             >
-              {{ record.data[field.field_name] || '-' }}
+              {{ record[field.field_name] || '-' }}
             </td>
             <td class="px-4 py-2.5 text-sm text-gray-500 dark:text-gray-400">
               <span class="truncate max-w-[150px] block" :title="record.source_file">
@@ -104,6 +104,7 @@
 <script setup lang="ts">
 import { ref, computed, watch, onMounted } from 'vue'
 import { useFieldStore } from '~/stores/field'
+import { resultsApi } from '~/utils/api'
 
 const route = useRoute()
 const projectId = computed(() => Number(route.params.id))
@@ -111,12 +112,7 @@ const fieldStore = useFieldStore()
 
 // 数据状态
 const loading = ref(false)
-const records = ref<Array<{
-  id: number
-  data: Record<string, any>
-  source_file: string
-  source_sheet: string
-}>>([])
+const records = ref<Record<string, any>[]>([])
 const totalCount = ref(0)
 const currentPage = ref(1)
 const pageSize = 50
@@ -128,17 +124,36 @@ const searchQuery = ref('')
 const fields = computed(() => fieldStore.fields)
 
 // 导出
-const exportData = () => console.log('Export data')
+const exportData = async () => {
+  try {
+    const blob = await resultsApi.export(projectId.value, 'xlsx')
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `results_${projectId.value}.xlsx`
+    a.click()
+    URL.revokeObjectURL(url)
+  } catch (error) {
+    console.error('Export failed:', error)
+  }
+}
 
 // 加载数据
 async function loadData() {
   loading.value = true
   try {
-    // TODO: 调用 API 加载数据
-    records.value = []
-    totalCount.value = 0
+    const result = await resultsApi.query(projectId.value, {
+      page: currentPage.value,
+      page_size: pageSize,
+      search: searchQuery.value || undefined,
+      status: 'success',
+    })
+    records.value = result.records
+    totalCount.value = result.total
   } catch (error) {
     console.error('Failed to load data:', error)
+    records.value = []
+    totalCount.value = 0
   } finally {
     loading.value = false
   }
@@ -150,5 +165,8 @@ watch(searchQuery, () => {
   loadData()
 })
 
-onMounted(() => loadData())
+onMounted(async () => {
+  await fieldStore.fetchFields(projectId.value)
+  await loadData()
+})
 </script>

@@ -31,14 +31,14 @@
             <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider w-12">
               必填
             </th>
+            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider w-12">
+              去重
+            </th>
             <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
               字段名称
             </th>
             <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
               字段类型
-            </th>
-            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-              补充提取要求
             </th>
             <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
               字段名
@@ -60,14 +60,14 @@
             <td class="px-4 py-3 text-center">
               <UIcon v-if="field.is_required" name="i-lucide-check" class="w-4 h-4 text-green-600" />
             </td>
+            <td class="px-4 py-3 text-center">
+              <UIcon v-if="field.is_dedup_key" name="i-lucide-fingerprint" class="w-4 h-4 text-primary-600" />
+            </td>
             <td class="px-4 py-3 text-sm text-gray-900 dark:text-white">
               {{ field.field_label }}
             </td>
             <td class="px-4 py-3 text-sm text-gray-600 dark:text-gray-400">
               {{ getFieldTypeLabel(field.field_type) }}
-            </td>
-            <td class="px-4 py-3 text-sm text-gray-600 dark:text-gray-400">
-              {{ field.additional_requirement || '-' }}
             </td>
             <td class="px-4 py-3 text-sm font-mono text-gray-600 dark:text-gray-400">
               {{ field.field_name }}
@@ -110,16 +110,9 @@
             <USelect v-model="fieldForm.field_type" :items="fieldTypes" class="w-full" />
           </UFormField>
 
-          <UFormField label="补充提取要求" name="additional_requirement">
-            <UTextarea
-              v-model="fieldForm.additional_requirement"
-              placeholder="可选，例如：只提取中文姓名，不包含英文"
-              :rows="2"
-              class="w-full"
-            />
-          </UFormField>
-
           <USwitch v-model="fieldForm.is_required" label="必填字段" />
+
+          <USwitch v-model="fieldForm.is_dedup_key" label="参与去重" />
 
           <div v-if="editingField" class="pt-4 border-t border-gray-200 dark:border-gray-700 space-y-3">
             <div class="text-sm font-medium text-gray-700 dark:text-gray-300">AI 生成的字段信息</div>
@@ -177,6 +170,7 @@ import { fieldsApi } from '~/utils/api'
 import type { ProjectField } from '~/types'
 
 const route = useRoute()
+const toast = useToast()
 const projectId = computed(() => Number(route.params.id))
 const fieldStore = useFieldStore()
 
@@ -203,8 +197,8 @@ const saving = ref(false)
 const fieldForm = reactive({
   field_label: '',
   field_type: 'text',
-  additional_requirement: '',
   is_required: false,
+  is_dedup_key: false,
 })
 
 function openFieldModal(field?: ProjectField) {
@@ -212,14 +206,14 @@ function openFieldModal(field?: ProjectField) {
     editingField.value = field
     fieldForm.field_label = field.field_label
     fieldForm.field_type = field.field_type
-    fieldForm.additional_requirement = field.additional_requirement || ''
     fieldForm.is_required = field.is_required
+    fieldForm.is_dedup_key = field.is_dedup_key || false
   } else {
     editingField.value = null
     fieldForm.field_label = ''
     fieldForm.field_type = 'text'
-    fieldForm.additional_requirement = ''
     fieldForm.is_required = false
+    fieldForm.is_dedup_key = false
   }
   showFieldModal.value = true
 }
@@ -234,39 +228,58 @@ async function saveField() {
 
   saving.value = true
   try {
-    // 调用 AI API 生成 field_name, validation_rule, extraction_hint
-    const aiResult = await fieldsApi.generateMetadata({
-      field_label: fieldForm.field_label,
-      field_type: fieldForm.field_type,
-      additional_requirement: fieldForm.additional_requirement.trim() || null,
-    })
+    // 编辑模式：检查字段名称是否变化
+    const isLabelChanged = editingField.value &&
+      editingField.value.field_label.trim() !== fieldForm.field_label.trim()
+
+    let fieldName = editingField.value?.field_name || ''
+    let validationRule = editingField.value?.validation_rule || null
+    let extractionHint = editingField.value?.extraction_hint || ''
+
+    // 仅在新增或字段名称变化时调用 AI
+    if (!editingField.value || isLabelChanged) {
+      const aiResult = await fieldsApi.generateMetadata({
+        field_label: fieldForm.field_label,
+        field_type: fieldForm.field_type,
+      })
+      fieldName = aiResult.field_name
+      validationRule = aiResult.validation_rule
+      extractionHint = aiResult.extraction_hint
+    }
 
     if (editingField.value) {
       await fieldStore.updateField(editingField.value.id, {
         field_label: fieldForm.field_label.trim(),
         field_type: fieldForm.field_type,
-        additional_requirement: fieldForm.additional_requirement.trim() || null,
         is_required: fieldForm.is_required,
-        field_name: aiResult.field_name,
-        validation_rule: aiResult.validation_rule,
-        extraction_hint: aiResult.extraction_hint,
+        is_dedup_key: fieldForm.is_dedup_key,
+        field_name: fieldName,
+        validation_rule: validationRule,
+        extraction_hint: extractionHint,
       })
+      toast.add({ title: '字段已更新', color: 'success' })
     } else {
       await fieldStore.createField({
         project_id: projectId.value,
         field_label: fieldForm.field_label.trim(),
         field_type: fieldForm.field_type,
-        additional_requirement: fieldForm.additional_requirement.trim() || null,
         is_required: fieldForm.is_required,
-        field_name: aiResult.field_name,
-        validation_rule: aiResult.validation_rule,
-        extraction_hint: aiResult.extraction_hint,
+        is_dedup_key: fieldForm.is_dedup_key,
+        field_name: fieldName,
+        validation_rule: validationRule,
+        extraction_hint: extractionHint,
       })
+      toast.add({ title: '字段已创建', color: 'success' })
     }
 
     closeFieldModal()
-  } catch (error) {
+  } catch (error: any) {
     console.error('Failed to save field:', error)
+    toast.add({
+      title: '保存失败',
+      description: error?.message || String(error),
+      color: 'error',
+    })
   } finally {
     saving.value = false
   }

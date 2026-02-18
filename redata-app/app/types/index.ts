@@ -12,9 +12,6 @@ export interface Project {
   id: number
   name: string
   description: string | null
-  dedup_enabled: boolean
-  dedup_fields: string[] | null
-  dedup_strategy: string
   created_at: string
   updated_at: string | null
 }
@@ -22,17 +19,11 @@ export interface Project {
 export interface CreateProjectRequest {
   name: string
   description?: string
-  dedup_enabled?: boolean
-  dedup_fields?: string[]
-  dedup_strategy?: string
 }
 
 export interface UpdateProjectRequest {
   name?: string
   description?: string
-  dedup_enabled?: boolean
-  dedup_fields?: string[]
-  dedup_strategy?: string
 }
 
 // 字段类型
@@ -43,6 +34,7 @@ export interface ProjectField {
   field_label: string
   field_type: string
   is_required: boolean
+  is_dedup_key: boolean  // 是否参与去重
   additional_requirement?: string | null
   validation_rule: string | null
   extraction_hint: string | null
@@ -56,6 +48,7 @@ export interface CreateFieldRequest {
   field_label: string
   field_type: string
   is_required?: boolean
+  is_dedup_key?: boolean
   additional_requirement?: string | null
   validation_rule?: string | null
   extraction_hint?: string | null
@@ -99,6 +92,7 @@ export interface CreateAiConfigRequest {
 
 // 处理任务类型
 export interface ProcessingTask {
+  id: string              // 与 task_id 一致，用于 UI 组件 key
   task_id: string
   project_id: number
   status: 'pending' | 'processing' | 'paused' | 'completed' | 'cancelled' | 'error'
@@ -110,6 +104,28 @@ export interface ProcessingTask {
   error_count: number
   batch_number: string | null
   message?: string
+  // UI 扩展字段
+  file_name?: string
+  sheet_name?: string
+  started_at?: string
+  duration?: number
+  progress?: number
+  error_message?: string
+}
+
+// 待处理文件类型
+export interface PendingFile {
+  id: string
+  path: string
+  name: string
+  size: number
+}
+
+// 日志条目类型
+export interface LogEntry {
+  time: string
+  message: string
+  type: 'info' | 'success' | 'warning' | 'error'
 }
 
 export interface StartProcessingRequest {
@@ -131,6 +147,20 @@ export interface ProcessingProgress {
   error_count?: number
   speed?: number
   message?: string
+  // 列映射事件附加字段
+  header_row?: number
+  mappings?: Record<string, string>
+  confidence?: number
+  unmatched_columns?: number[]
+}
+
+// 处理阶段类型
+export type ProcessingStageStatus = 'pending' | 'active' | 'completed' | 'error'
+
+export interface ProcessingStage {
+  key: 'preparing' | 'ai_mapping' | 'importing' | 'done'
+  label: string
+  status: ProcessingStageStatus
 }
 
 // 查询结果类型

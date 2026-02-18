@@ -23,6 +23,7 @@ class TestConnectionResponse(BaseModel):
     """测试连接响应"""
     success: bool
     message: str
+    response: str = ""
 
 
 router = APIRouter()
@@ -106,11 +107,12 @@ async def test_connection(request: TestConnectionRequest, db: Session = Depends(
     else:
         raise HTTPException(status_code=400, detail="请提供 config_id 或完整的配置参数")
 
-    success = await test_ai_connection(config)
+    result = await test_ai_connection(config)
 
     return TestConnectionResponse(
-        success=success,
-        message="连接成功" if success else "连接失败，请检查配置"
+        success=result["success"],
+        message=result["message"],
+        response=result["response"]
     )
 
 

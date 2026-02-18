@@ -4,18 +4,23 @@
   "private": true,
   "scripts": {
     "dev": "nuxt dev",
+    "dev:backend": "cd backend && uv run python run.py",
     "build": "nuxt build",
     "generate": "nuxt generate",
     "preview": "nuxt preview",
     "postinstall": "nuxt prepare",
     "tauri": "tauri",
     "tauri:dev": "tauri dev",
-    "tauri:build": "tauri build"
+    "tauri:build": "tauri build",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage"
   },
   "dependencies": {
     "@nuxt/ui": "^4.4.0",
     "@pinia/nuxt": "^0.11.3",
     "@tauri-apps/api": "^2.10.1",
+    "@tauri-apps/plugin-dialog": "^2.6.0",
     "nuxt": "^4.3.1",
     "pinia": "^3.0.4",
     "tailwindcss": "^4.1.18",
@@ -29,6 +34,12 @@
   "author": "",
   "license": "ISC",
   "devDependencies": {
-    "@tauri-apps/cli": "^2.10.0"
+    "@nuxt/test-utils": "^3.19.1",
+    "@tauri-apps/cli": "^2.10.0",
+    "@vue/test-utils": "^2.4.6",
+    "concurrently": "^9.2.1",
+    "happy-dom": "^17.6.3",
+    "msw": "^2.12.10",
+    "vitest": "^3.2.4"
   }
 }

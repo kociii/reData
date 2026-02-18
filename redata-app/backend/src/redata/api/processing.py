@@ -119,6 +119,12 @@ async def start_processing(
     if not ai_config:
         raise HTTPException(status_code=400, detail="未找到 AI 配置")
 
+    # 生成 task_id 和 batch_number（在返回响应前生成）
+    import uuid
+    task_id = str(uuid.uuid4())
+    from datetime import datetime
+    batch_number = f"batch_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+
     # 创建提取器
     extractor = Extractor(
         db=db,
@@ -128,6 +134,10 @@ async def start_processing(
             broadcast_progress(p)
         )
     )
+
+    # 预设置 task_id 和 batch_number（在返回前设置）
+    extractor.task_id = task_id
+    extractor.batch_number = batch_number
 
     # 注册提取器
     register_extractor(extractor.task_id, extractor)
@@ -160,7 +170,7 @@ async def run_processing(extractor: Extractor, file_paths: List[str]):
         file_paths: 文件路径列表
     """
     try:
-        result = await extractor.process_files(file_paths)
+        result = await extractor.process_files(file_paths, task_id=extractor.task_id)
         # 发送完成通知
         await manager.broadcast(extractor.task_id, {
             "event": "completed",
@@ -187,7 +197,7 @@ async def broadcast_progress(progress: ProcessingProgress):
     Args:
         progress: 进度数据
     """
-    await manager.broadcast(progress.task_id, {
+    data = {
         "event": progress.event,
         "task_id": progress.task_id,
         "current_file": progress.current_file,
@@ -198,8 +208,15 @@ async def broadcast_progress(progress: ProcessingProgress):
         "success_count": progress.success_count,
         "error_count": progress.error_count,
         "speed": progress.speed,
-        "message": progress.message
-    })
+        "message": progress.message,
+    }
+    # 列映射事件附加额外字段
+    if progress.event == "column_mapping":
+        data["header_row"] = progress.header_row
+        data["mappings"] = progress.mappings
+        data["confidence"] = progress.confidence
+        data["unmatched_columns"] = progress.unmatched_columns
+    await manager.broadcast(progress.task_id, data)
 
 
 @router.post("/pause/{task_id}", response_model=TaskStatusResponse)

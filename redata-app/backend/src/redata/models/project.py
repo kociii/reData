@@ -39,11 +39,14 @@ class ProjectField(Base):
     field_label = Column(String, nullable=False)
     field_type = Column(String, nullable=False)  # text, number, email, phone, date, url
     is_required = Column(Boolean, default=False)
+    is_dedup_key = Column(Boolean, default=False)  # 是否参与去重
+    is_deleted = Column(Boolean, default=False)  # 软删除标记
     additional_requirement = Column(Text, nullable=True)
     validation_rule = Column(Text, nullable=True)
     extraction_hint = Column(Text, nullable=True)
     display_order = Column(Integer, default=0)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+    deleted_at = Column(DateTime(timezone=True), nullable=True)  # 删除时间
 
 class ProcessingTask(Base):
     __tablename__ = "processing_tasks"

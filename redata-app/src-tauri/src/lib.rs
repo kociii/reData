@@ -2,9 +2,12 @@
 
 // 导出 Rust 后端模块
 pub mod backend;
+// 导出 Tauri Commands 模块
+pub mod commands;
 
 use std::process::{Child, Command};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
+use sea_orm::DatabaseConnection;
 
 // 全局变量存储后端进程
 static BACKEND_PROCESS: Mutex<Option<Child>> = Mutex::new(None);
@@ -122,35 +125,42 @@ fn stop_backend_server() {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    // 启动 Rust 后端服务器（推荐）
-    println!("🚀 启动 Rust 后端服务器（端口 8001）...");
-    start_rust_backend();
+    // 初始化 tokio runtime（用于异步数据库操作）
+    let runtime = tokio::runtime::Runtime::new().expect("Failed to create tokio runtime");
 
-    // 可选：同时启动 Python 后端（如果需要）
-    // match start_python_backend_server() {
-    //     Ok(child) => {
-    //         if let Ok(mut process) = BACKEND_PROCESS.lock() {
-    //             *process = Some(child);
-    //         }
-    //     }
-    //     Err(e) => {
-    //         eprintln!("启动 Python 后端服务器失败: {}", e);
-    //     }
-    // }
+    // 初始化数据库连接
+    println!("🔌 正在连接数据库...");
+    let db = runtime.block_on(async {
+        backend::infrastructure::persistence::database::init_database()
+            .await
+            .expect("Failed to initialize database")
+    });
+    println!("✅ 数据库连接成功");
 
-    // 等待后端服务器启动
-    std::thread::sleep(std::time::Duration::from_secs(2));
+    // 运行数据库迁移
+    println!("🔄 正在运行数据库迁移...");
+    runtime.block_on(async {
+        backend::infrastructure::persistence::migrations::run_migrations(&db)
+            .await
+            .expect("Failed to run migrations")
+    });
+    println!("✅ 数据库迁移完成");
+
+    // 将数据库连接包装为 Arc，用于在多个 commands 之间共享
+    let db = Arc::new(db);
 
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_dialog::init())
-        .invoke_handler(tauri::generate_handler![greet])
-        .on_window_event(|_window, event| {
-            if let tauri::WindowEvent::Destroyed = event {
-                // 窗口关闭时停止后端服务器
-                stop_backend_server();
-            }
-        })
+        .manage(db)
+        .invoke_handler(tauri::generate_handler![
+            greet,
+            commands::get_projects,
+            commands::create_project,
+            commands::get_project,
+            commands::update_project,
+            commands::delete_project,
+        ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

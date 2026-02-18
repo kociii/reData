@@ -1,3 +1,4 @@
+import { invoke } from '@tauri-apps/api/core'
 import type {
   Project,
   CreateProjectRequest,
@@ -14,15 +15,10 @@ import type {
   ExcelPreview,
 } from '~/types'
 
-// 使用环境变量或默认值来选择后端
-// RUST_BACKEND=true 使用 Rust 后端（端口 8001）
-// 否则使用 Python 后端（端口 8000）
-const USE_RUST_BACKEND = process.env.RUST_BACKEND === 'true' || true // 临时默认使用 Rust 后端
-const API_BASE = USE_RUST_BACKEND
-  ? 'http://127.0.0.1:8001/api'
-  : 'http://127.0.0.1:8000/api'
+// 使用 Tauri Commands 模式（零网络开销）
+const USE_TAURI_COMMANDS = true
 
-console.log(`Using ${USE_RUST_BACKEND ? 'Rust' : 'Python'} backend: ${API_BASE}`)
+console.log(`Using ${USE_TAURI_COMMANDS ? 'Tauri Commands' : 'HTTP API'} backend`)
 
 // 通用请求函数
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
@@ -46,26 +42,59 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
 // ============ 项目 API ============
 
 export const projectsApi = {
-  list: () => request<Project[]>('/projects'),
+  list: async () => {
+    if (USE_TAURI_COMMANDS) {
+      return await invoke<Project[]>('get_projects')
+    }
+    return request<Project[]>('/projects')
+  },
 
-  get: (id: number) => request<Project>(`/projects/${id}`),
+  get: async (id: number) => {
+    if (USE_TAURI_COMMANDS) {
+      return await invoke<Project>('get_project', { id })
+    }
+    return request<Project>(`/projects/${id}`)
+  },
 
-  create: (data: CreateProjectRequest) =>
-    request<Project>('/projects', {
+  create: async (data: CreateProjectRequest) => {
+    if (USE_TAURI_COMMANDS) {
+      return await invoke<Project>('create_project', {
+        name: data.name,
+        description: data.description,
+      })
+    }
+    return request<Project>('/projects', {
       method: 'POST',
       body: JSON.stringify(data),
-    }),
+    })
+  },
 
-  update: (id: number, data: UpdateProjectRequest) =>
-    request<Project>(`/projects/${id}`, {
+  update: async (id: number, data: UpdateProjectRequest) => {
+    if (USE_TAURI_COMMANDS) {
+      return await invoke<Project>('update_project', {
+        id,
+        name: data.name,
+        description: data.description,
+        dedup_enabled: data.dedup_enabled,
+        dedup_fields: data.dedup_fields,
+        dedup_strategy: data.dedup_strategy,
+      })
+    }
+    return request<Project>(`/projects/${id}`, {
       method: 'PUT',
       body: JSON.stringify(data),
-    }),
+    })
+  },
 
-  delete: (id: number) =>
-    request<void>(`/projects/${id}`, {
+  delete: async (id: number) => {
+    if (USE_TAURI_COMMANDS) {
+      await invoke<void>('delete_project', { id })
+      return
+    }
+    return request<void>(`/projects/${id}`, {
       method: 'DELETE',
-    }),
+    })
+  },
 }
 
 // ============ 字段 API ============

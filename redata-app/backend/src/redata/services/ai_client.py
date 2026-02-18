@@ -47,8 +47,8 @@ class AIClient:
 
     # 重试配置
     MAX_RETRIES = 3
-    RETRY_DELAY = 1.0  # 秒
-    TIMEOUT = 30.0  # 秒
+    RETRY_DELAY = 2.0  # 秒
+    TIMEOUT = 120.0  # 秒（AI 分析可能较慢）
 
     def __init__(self, config: AiConfig):
         """
@@ -99,57 +99,71 @@ class AIClient:
         additional_requirement: Optional[str] = None
     ) -> FieldMetadata:
         """
-        生成字段元数据（英文名、验证规则和提取提示）
+        生成字段元数据（只翻译英文名，验证规则本地生成）
 
         Args:
             field_label: 字段标签（中文）
             field_type: 字段类型
-            additional_requirement: 补充提取要求（可选）
+            additional_requirement: 补充提取要求（可选，暂未使用）
 
         Returns:
             FieldMetadata 对象
         """
-        additional_text = f"\n- 补充要求：{additional_requirement}" if additional_requirement else ""
+        # 简化提示词，只要求翻译英文名
+        prompt = f"""将以下中文字段名翻译成标准的英文字段名（snake_case 格式）。
 
-        prompt = f"""你是一个数据建模专家。用户正在创建一个数据提取字段，请帮助生成字段的元数据。
+字段名称：{field_label}
 
-字段信息：
-- 字段标签（中文）：{field_label}
-- 字段类型：{field_type}{additional_text}
+要求：
+1. 使用 snake_case 命名规范（小写字母，下划线分隔）
+2. 翻译要准确，符合数据库字段命名规范
+3. 只返回英文字段名，不要有其他内容
 
-请生成以下内容：
-1. 标准的英文字段名（遵循 snake_case 命名规范，如 phone_number, company_name）
-2. 验证规则（根据字段类型生成正则表达式或验证规则，如果不需要验证则返回 null）
-   - phone: 中国手机号 11 位，以 1 开头
-   - email: 标准邮箱格式
-   - url: 以 http:// 或 https:// 开头
-   - date: 日期格式 YYYY-MM-DD 或 YYYY/MM/DD
-   - number: 数字格式
-   - text: 不需要验证，返回 null
-3. 数据提取提示（简洁描述如何识别和提取这个字段，用于指导 AI 提取数据）
-
-请以 JSON 格式返回：
-{{
-  "field_name": "生成的英文字段名",
-  "validation_rule": "验证规则或 null",
-  "extraction_hint": "提取提示说明"
-}}
-
-只返回 JSON，不要有其他内容。"""
+示例：
+- 客户姓名 -> customer_name
+- 手机号码 -> phone_number
+- 电子邮箱 -> email
+- 公司名称 -> company_name
+- 联系地址 -> address"""
 
         response = await self.call_api(prompt)
 
-        try:
-            # 尝试提取 JSON（处理可能的 markdown 代码块）
-            json_str = self._extract_json(response)
-            data = json.loads(json_str)
-            return FieldMetadata(
-                field_name=data.get("field_name", ""),
-                validation_rule=data.get("validation_rule"),
-                extraction_hint=data.get("extraction_hint", "")
-            )
-        except json.JSONDecodeError as e:
-            raise AIClientError(f"解析字段元数据失败: {str(e)}")
+        # 清理响应，去除可能的空格和换行
+        field_name = response.strip().lower().replace(" ", "_").replace("-", "_")
+
+        # 本地生成验证规则（根据字段类型）
+        validation_rule = self._get_validation_rule(field_type)
+
+        # 生成本地提取提示
+        extraction_hint = f"提取{field_label}字段"
+
+        return FieldMetadata(
+            field_name=field_name,
+            validation_rule=validation_rule,
+            extraction_hint=extraction_hint
+        )
+
+    def _get_validation_rule(self, field_type: str) -> Optional[str]:
+        """
+        根据字段类型获取验证规则
+
+        Args:
+            field_type: 字段类型
+
+        Returns:
+            验证规则正则表达式，如果不需要验证则返回 None
+        """
+        VALIDATION_RULES = {
+            "phone": r"^1[3-9]\d{9}$",                    # 中国手机号
+            "email": r"^[\w\.-]+@[\w\.-]+\.\w+$",         # 邮箱
+            "url": r"^https?://",                          # URL
+            "date": r"^\d{4}[-/]\d{1,2}[-/]\d{1,2}$",    # 日期
+            "number": r"^-?\d+(\.\d+)?$",                  # 数字
+            "text": None,                                  # 文本不需要验证
+            "address": None,                               # 地址不需要验证
+            "company": None,                               # 公司名称不需要验证
+        }
+        return VALIDATION_RULES.get(field_type)
 
     async def recognize_header(self, rows: List[List[str]]) -> HeaderRecognitionResult:
         """
@@ -395,7 +409,7 @@ class AIClient:
         await self.client.close()
 
 
-async def test_ai_connection(config: AiConfig) -> bool:
+async def test_ai_connection(config: AiConfig) -> dict:
     """
     测试 AI 配置连接是否正常
 
@@ -403,13 +417,23 @@ async def test_ai_connection(config: AiConfig) -> bool:
         config: AI 配置对象
 
     Returns:
-        连接是否成功
+        包含 success, message, response 的字典
     """
     try:
         client = AIClient(config)
         # 简单的测试调用
         response = await client.call_api("请回复 OK")
         await client.close()
-        return "OK" in response.upper() or len(response) > 0
-    except Exception:
-        return False
+
+        success = len(response) > 0
+        return {
+            "success": success,
+            "message": "连接成功" if success else "连接失败",
+            "response": response[:200] if response else ""  # 截取前200字符
+        }
+    except Exception as e:
+        return {
+            "success": False,
+            "message": f"连接失败: {str(e)}",
+            "response": ""
+        }

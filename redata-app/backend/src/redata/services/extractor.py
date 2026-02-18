@@ -35,6 +35,11 @@ class ProcessingProgress:
     error_count: int = 0
     speed: float = 0.0  # 行/秒
     message: str = ""
+    # 列映射相关字段
+    header_row: int = 0
+    mappings: Dict[str, str] = field(default_factory=dict)
+    confidence: float = 0.0
+    unmatched_columns: List[int] = field(default_factory=list)
 
 
 @dataclass
@@ -104,7 +109,8 @@ class Extractor:
         """获取项目字段定义（带缓存）"""
         if self._fields is None:
             self._fields = self.db.query(ProjectField).filter(
-                ProjectField.project_id == self.project.id
+                ProjectField.project_id == self.project.id,
+                ProjectField.is_deleted == False
             ).order_by(ProjectField.display_order).all()
         return self._fields
 
@@ -139,9 +145,9 @@ class Extractor:
         Returns:
             ProcessingResult 对象
         """
-        # 初始化任务
-        self.task_id = task_id or str(uuid.uuid4())
-        self.batch_number = self._generate_batch_number()
+        # 初始化任务（保留预设值）
+        self.task_id = self.task_id or task_id or str(uuid.uuid4())
+        self.batch_number = self.batch_number or self._generate_batch_number()
         self.start_time = asyncio.get_event_loop().time()
         self.processed_count = 0
 
@@ -178,9 +184,12 @@ class Extractor:
         self.db.add(batch)
         self.db.commit()
 
-        # 确保项目数据表存在
+        # 确保项目数据表存在且结构正确
         if not self.storage.table_exists(self.project.id):
             self.storage.create_project_table(self.project.id, self.fields)
+        else:
+            # 检查表结构是否与当前字段定义一致，缺少列时自动迁移
+            self.storage.migrate_table_structure(self.project.id, self.fields)
 
         total_rows = 0
         success_count = 0
@@ -330,6 +339,11 @@ class Extractor:
 
         # 2. AI 分析列映射
         try:
+            self.send_progress(
+                "ai_analyzing",
+                current_sheet=sheet_name,
+                message=f"正在进行 AI 列映射分析..."
+            )
             mapping = await self.ai_client.analyze_column_mapping(
                 sample_rows=sample_rows,
                 fields=self.fields

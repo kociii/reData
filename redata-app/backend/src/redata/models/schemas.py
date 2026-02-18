@@ -7,9 +7,6 @@ from datetime import datetime
 class ProjectBase(BaseModel):
     name: str
     description: Optional[str] = None
-    dedup_enabled: bool = True
-    dedup_fields: Optional[List[str]] = None
-    dedup_strategy: str = "skip"
 
 class ProjectCreate(ProjectBase):
     pass
@@ -32,6 +29,7 @@ class ProjectFieldBase(BaseModel):
     field_label: str
     field_type: str
     is_required: bool = False
+    is_dedup_key: bool = False  # 是否参与去重
     additional_requirement: Optional[str] = None
     validation_rule: Optional[str] = None
     extraction_hint: Optional[str] = None
@@ -48,8 +46,10 @@ class ProjectFieldUpdate(ProjectFieldBase):
 class ProjectFieldResponse(ProjectFieldBase):
     id: int
     project_id: int
+    is_deleted: bool = False
+    deleted_at: Optional[datetime] = None
     created_at: datetime
-    
+
     class Config:
         from_attributes = True
 
