@@ -72,7 +72,7 @@
               :key="field.id"
               class="px-4 py-2.5 text-sm text-gray-900 dark:text-white"
             >
-              {{ record.data?.[field.id] || '-' }}
+              {{ record[field.id] || '-' }}
             </td>
             <td class="px-4 py-2.5 text-sm text-gray-500 dark:text-gray-400">
               <span class="truncate max-w-[150px] block" :title="record.source_file || ''">
