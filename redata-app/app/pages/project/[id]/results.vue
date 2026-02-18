@@ -1,9 +1,9 @@
 <template>
   <div class="h-full flex flex-col -m-6">
     <!-- 工具栏 -->
-    <div class="flex justify-between items-center px-6 py-3 border-b border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 flex-shrink-0">
+    <div class="flex justify-between items-center px-6 py-3 border-b border-default bg-elevated flex-shrink-0">
       <div class="flex items-center gap-4">
-        <span class="text-sm text-gray-500 dark:text-gray-400">
+        <span class="text-sm text-muted">
           共 {{ totalCount }} 条记录
         </span>
         <UInput
@@ -25,36 +25,40 @@
       </div>
     </div>
 
-    <!-- 数据表格（表头始终显示） -->
+    <!-- 数据表格（支持横向滚动） -->
     <div class="flex-1 overflow-auto">
-      <table class="min-w-full">
-        <thead class="bg-gray-50 dark:bg-gray-900 sticky top-0 z-10">
+      <table class="min-w-max">
+        <thead class="bg-muted sticky top-0 z-10">
           <tr>
-            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider w-16">
+            <th class="px-4 py-3 text-left text-xs font-medium text-muted uppercase tracking-wider w-16">
               #
             </th>
             <th
               v-for="field in fields"
               :key="field.id"
-              class="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider"
+              class="px-4 py-3 text-left text-xs font-medium text-muted uppercase tracking-wider whitespace-nowrap"
+              style="min-width: 100px; max-width: 180px;"
             >
               {{ field.field_label }}
             </th>
-            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+            <th class="px-4 py-3 text-left text-xs font-medium text-muted uppercase tracking-wider whitespace-nowrap" style="min-width: 120px;">
               来源
+            </th>
+            <th class="px-4 py-3 text-left text-xs font-medium text-muted uppercase tracking-wider whitespace-nowrap" style="min-width: 200px;">
+              原始数据
             </th>
           </tr>
         </thead>
-        <tbody class="divide-y divide-gray-200 dark:divide-gray-700 bg-white dark:bg-gray-800">
+        <tbody class="divide-y divide-default bg-elevated">
           <!-- 加载状态 -->
           <tr v-if="loading">
-            <td :colspan="fields.length + 2" class="px-4 py-16 text-center">
+            <td :colspan="fields.length + 3" class="px-4 py-16 text-center">
               <UIcon name="i-lucide-refresh-cw" class="w-8 h-8 animate-spin text-primary mx-auto" />
             </td>
           </tr>
           <!-- 空状态 -->
           <tr v-else-if="records.length === 0">
-            <td :colspan="fields.length + 2" class="px-4 py-16 text-center text-gray-500 dark:text-gray-400">
+            <td :colspan="fields.length + 3" class="px-4 py-16 text-center text-muted">
               导入文件并处理后将在此显示数据
             </td>
           </tr>
@@ -62,22 +66,38 @@
           <tr
             v-for="(record, index) in records"
             :key="record.id"
-            class="hover:bg-gray-50 dark:hover:bg-gray-900"
+            class="hover:bg-muted"
           >
-            <td class="px-4 py-2.5 text-sm text-gray-500 dark:text-gray-400">
+            <td class="px-4 py-2.5 text-sm text-muted">
               {{ (currentPage - 1) * pageSize + index + 1 }}
             </td>
             <td
               v-for="field in fields"
               :key="field.id"
-              class="px-4 py-2.5 text-sm text-gray-900 dark:text-white"
+              class="px-4 py-2.5 text-sm text-highlighted"
+              style="max-width: 180px;"
             >
-              {{ record[field.id] || '-' }}
+              <div class="whitespace-pre-wrap break-words">
+                {{ record[field.id] || '-' }}
+              </div>
             </td>
-            <td class="px-4 py-2.5 text-sm text-gray-500 dark:text-gray-400">
-              <span class="truncate max-w-[150px] block" :title="record.source_file || ''">
+            <td class="px-4 py-2.5 text-sm text-muted" style="max-width: 150px;">
+              <div class="whitespace-pre-wrap break-words">
                 {{ record.source_file || '-' }}
-              </span>
+                <span v-if="record.source_sheet" class="text-xs text-dimmed block">
+                  / {{ record.source_sheet }}
+                </span>
+              </div>
+            </td>
+            <td class="px-4 py-2.5 text-sm text-default" style="max-width: 300px;">
+              <div
+                v-if="record.raw_data && record.raw_data.length > 0"
+                class="font-mono text-xs whitespace-pre-wrap break-words bg-muted rounded p-1.5"
+                :title="formatRawData(record.raw_data)"
+              >
+                {{ truncateRawData(record.raw_data) }}
+              </div>
+              <span v-else class="text-dimmed">-</span>
             </td>
           </tr>
         </tbody>
@@ -85,8 +105,8 @@
     </div>
 
     <!-- 分页栏 -->
-    <div v-if="totalCount > 0" class="flex justify-between items-center px-6 py-2.5 border-t border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 flex-shrink-0">
-      <span class="text-sm text-gray-500 dark:text-gray-400">
+    <div v-if="totalCount > 0" class="flex justify-between items-center px-6 py-2.5 border-t border-default bg-elevated flex-shrink-0">
+      <span class="text-sm text-muted">
         显示 {{ (currentPage - 1) * pageSize + 1 }} - {{ Math.min(currentPage * pageSize, totalCount) }} / {{ totalCount }} 条
       </span>
       <UPagination
@@ -124,6 +144,20 @@ let searchTimeout: ReturnType<typeof setTimeout> | null = null
 // 字段定义
 const fields = computed(() => fieldStore.fields)
 
+// 格式化原始数据（用于 tooltip）
+function formatRawData(rawData: string[]): string {
+  return rawData.join(' | ')
+}
+
+// 截断原始数据显示
+function truncateRawData(rawData: string[]): string {
+  const joined = rawData.map((cell, i) => `[${i}] ${cell}`).join('\n')
+  if (joined.length > 500) {
+    return joined.slice(0, 500) + '...'
+  }
+  return joined
+}
+
 // 导出
 const exportData = async () => {
   try {
@@ -149,7 +183,11 @@ async function loadData() {
       search: searchQuery.value || undefined,
       status: 'success',
     })
-    records.value = result.records
+    // 解析 raw_data JSON
+    records.value = result.records.map((r: any) => ({
+      ...r,
+      raw_data: r.raw_data ? JSON.parse(r.raw_data) : null,
+    }))
     totalCount.value = result.total
   } catch (error) {
     console.error('Failed to load data:', error)
