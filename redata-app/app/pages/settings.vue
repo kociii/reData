@@ -111,28 +111,6 @@
         </UButton>
       </div>
       <div class="p-4 space-y-4">
-        <!-- 主题设置 -->
-        <div class="flex items-center justify-between">
-          <div>
-            <div class="font-medium text-highlighted">主题设置</div>
-            <div class="text-sm text-muted">选择应用外观主题</div>
-          </div>
-          <div class="flex items-center gap-2">
-            <UButton
-              v-for="option in themeOptions"
-              :key="option.value"
-              :color="globalSettings.settings.theme === option.value ? 'primary' : 'neutral'"
-              :variant="globalSettings.settings.theme === option.value ? 'solid' : 'ghost'"
-              size="xs"
-              @click="globalSettings.updateSetting('theme', option.value)"
-            >
-              {{ option.label }}
-            </UButton>
-          </div>
-        </div>
-
-        <USeparator />
-
         <!-- 并行处理数 -->
         <div class="flex items-center justify-between">
           <div>
@@ -269,13 +247,6 @@ const toast = useToast()
 const configStore = useConfigStore()
 const globalSettings = useGlobalSettingsStore()
 
-// 主题选项
-const themeOptions = [
-  { value: 'light' as const, label: '浅色' },
-  { value: 'dark' as const, label: '深色' },
-  { value: 'system' as const, label: '跟随系统' },
-]
-
 // 重复数据处理选项
 const duplicateOptions = [
   { value: 'skip' as const, label: '跳过' },
@@ -287,7 +258,6 @@ const duplicateOptions = [
 const hasChanges = computed(() => {
   return (
     globalSettings.settings.parallelCount !== 3 ||
-    globalSettings.settings.theme !== 'system' ||
     globalSettings.settings.autoSave !== true ||
     globalSettings.settings.duplicateStrategy !== 'skip'
   )
