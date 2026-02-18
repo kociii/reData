@@ -42,30 +42,52 @@
 - OpenAI SDK - 官方 AI 集成库
 - uvicorn - 高性能 ASGI 服务器
 
-**Rust + Axum**（新实现，高性能版本）🚀：
-- Axum 0.7 - 高性能异步 Web 框架
+**Rust + Tauri Commands**（当前架构）🚀：
+- Tauri 2.x - 桌面应用框架
+- Tauri Commands - 零网络开销的前后端通信
 - SeaORM 1.0 - 异步 ORM，支持 SQLite
 - async-openai 0.24 - OpenAI API 客户端
 - calamine + rust_xlsxwriter - Excel 处理
 - tokio - 异步运行时
 - DDD 架构 - 领域驱动设计
-- 性能提升：启动时间 ~1秒，内存占用 ~10MB，API 响应 <5ms
+- 性能优势：启动时间 ~1秒，内存占用 ~10MB，零网络延迟
 
 ## 架构
 
 ### 通信模式
 
-应用使用 HTTP API 进行前后端通信：
+**当前架构：Tauri Commands 模式（零网络开销）** 🚀
 
-**前端 → 后端**: 通过 HTTP API 调用后端服务
-- Python 后端：http://127.0.0.1:8000
-- Rust 后端：http://127.0.0.1:8001 🚀
+应用使用 Tauri Commands 进行前后端通信，实现零网络开销的直接函数调用：
 
-**后端 → 前端**: 通过 WebSocket 进行实时进度更新
+**前端 → 后端**: 通过 Tauri `invoke()` 直接调用 Rust Commands
+- 零网络开销：直接函数调用，无 HTTP 请求
+- 更快的响应速度：无序列化/反序列化开销
+- 类型安全：Rust 类型系统保证数据一致性
 
-**切换后端**：前端支持通过配置切换使用 Python 或 Rust 后端（默认使用 Rust）
+**后端 → 前端**: 通过 WebSocket 进行实时进度更新（待实现）
 
-### API 路由（位于 `backend/src/redata/api/`）：
+**历史架构**：
+- ~~Python 后端：http://127.0.0.1:8000~~（已弃用）
+- ~~Rust HTTP 后端：http://127.0.0.1:8001~~（已替换为 Tauri Commands）
+
+### Tauri Commands（位于 `src-tauri/src/commands/`）
+
+**项目管理 Commands**（`commands/projects.rs`）：
+- `get_projects` - 获取项目列表 ✅
+- `get_project` - 获取单个项目 ✅
+- `create_project` - 创建项目 ✅
+- `update_project` - 更新项目 ✅
+- `delete_project` - 删除项目 ✅
+
+**待实现的 Commands**：
+- 字段管理 Commands
+- AI 配置 Commands
+- 文件处理 Commands
+- 数据处理 Commands
+- 结果查询 Commands
+
+### API 路由（Python 后端，已弃用）
 
 - `projects.py` - 项目的 CRUD 操作 ✅
 - `fields.py` - 字段定义的 CRUD 操作 ✅

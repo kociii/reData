@@ -35,21 +35,20 @@ reData 是一个多项目管理系统，允许用户创建不同的项目，每�
 
 ### 桌面框架
 - **Tauri 2.x** - 轻量级桌面应用框架
+- **Tauri Commands** - 零网络开销的前后端通信 🚀
 
-### 后端（双实现）
+### 后端（Rust + Tauri Commands）
 
-#### Python 后端（生产版本）
-- **FastAPI** - 现代 Python Web 框架
-- **SQLAlchemy** - Python ORM
-- **pandas + openpyxl** - Excel 处理
-- **OpenAI SDK** - AI 集成
-
-#### Rust 后端（高性能版本）🚀
-- **Axum 0.7** - 高性能异步 Web 框架
+**当前架构：Tauri Commands 模式** 🚀
+- **Tauri Commands** - 零网络开销，直接函数调用
 - **SeaORM 1.0** - 异步 ORM
 - **async-openai 0.24** - OpenAI API 客户端
 - **calamine + rust_xlsxwriter** - Excel 处理
 - **DDD 架构** - 领域驱动设计
+
+**历史实现**（已弃用）：
+- ~~Python + FastAPI（HTTP API）~~
+- ~~Rust + Axum（HTTP API）~~
 
 ### 数据库
 - **SQLite 3.40+** - 本地数据库
@@ -59,9 +58,8 @@ reData 是一个多项目管理系统，允许用户创建不同的项目，每�
 ### 环境要求
 
 - **Node.js** 18+
-- **Python** 3.11+ (如果使用 Python 后端)
-- **Rust** 1.75+ (如果使用 Rust 后端)
-- **uv** (Python 包管理器)
+- **Rust** 1.75+
+- **Cargo** (Rust 包管理器)
 
 ### 安装依赖
 
@@ -74,49 +72,23 @@ cd reData
 cd redata-app
 npm install
 
-# 安装 Python 后端依赖
-cd backend
-uv sync
-cd ..
-
-# Rust 后端依赖会在构建时自动安装
+# Rust 依赖会在构建时自动安装
 ```
 
 ### 开发模式
 
-#### 方式 1：使用 Rust 后端（推荐）🚀
-
-```bash
-# 终端 1：启动 Rust 后端
-cd redata-app/src-tauri
-cargo run --bin server
-
-# 终端 2：启动前端
-cd redata-app
-npm run dev
-```
-
-访问 http://localhost:3000
-
-#### 方式 2：使用 Python 后端
-
-```bash
-# 终端 1：启动 Python 后端
-cd redata-app/backend
-uv run python run.py
-
-# 终端 2：启动前端（需修改配置）
-cd redata-app
-# 编辑 app/utils/api.ts，设置 USE_RUST_BACKEND = false
-npm run dev
-```
-
-#### 方式 3：Tauri 开发模式
+**Tauri 开发模式（推荐）** 🚀
 
 ```bash
 cd redata-app
 npm run tauri:dev
 ```
+
+这将自动：
+1. 启动 Nuxt 前端开发服务器（http://localhost:3000）
+2. 编译并运行 Rust 后端（Tauri Commands）
+3. 初始化数据库并运行迁移
+4. 打开桌面应用窗口
 
 ### 生产构建
 
@@ -125,47 +97,35 @@ cd redata-app
 npm run tauri:build
 ```
 
-## 📊 性能对比
+## 📊 性能优势
 
-| 指标 | Rust 后端 🚀 | Python 后端 |
-|------|-------------|-------------|
+| 指标 | Tauri Commands 🚀 | HTTP API（旧） |
+|------|-------------------|----------------|
+| 通信延迟 | 0ms（直接调用） | ~1-5ms |
+| 内存占用 | ~10 MB | ~15-20 MB |
 | 启动时间 | ~1 秒 | ~2-3 秒 |
-| 内存占用 | ~10 MB | ~50 MB |
-| API 响应 | < 5ms | ~10-20ms |
-| 并发性能 | 优秀 | 良好 |
+| 架构复杂度 | 简单 | 复杂 |
 
-## 🎯 Rust 后端实现进度
+## 🎯 实现进度
 
-- ✅ **Phase 1**: 基础架构搭建（DDD 架构、错误处理、日志系统）
-- ✅ **Phase 2**: 数据库层实现（SeaORM、数据模型、自动迁移、加密工具）
-- ✅ **Phase 3**: 项目管理 API（完整 CRUD 操作）
-- ⏳ **Phase 4**: 字段管理 API
-- ⏳ **Phase 5**: AI 配置管理 API
-- ⏳ **Phase 6**: 文件管理 API
-- ⏳ **Phase 7**: 数据处理核心
-- ⏳ **Phase 8**: 处理任务 API
-- ⏳ **Phase 9**: 结果管理 API
+**Tauri Commands 实现**：
+- ✅ **项目管理** - 完整 CRUD 操作（get_projects, create_project, update_project, delete_project）
+- ⏳ **字段管理** - 待实现
+- ⏳ **AI 配置管理** - 待实现
+- ⏳ **文件管理** - 待实现
+- ⏳ **数据处理核心** - 待实现
+- ⏳ **处理任务管理** - 待实现
+- ⏳ **结果管理** - 待实现
 
 ## 📚 文档
 
 - [CLAUDE.md](CLAUDE.md) - Claude Code 工作指南
-- [RUST_BACKEND_TESTING.md](redata-app/RUST_BACKEND_TESTING.md) - Rust 后端测试指南
 - [DDD_ARCHITECTURE.md](redata-app/backend/DDD_ARCHITECTURE.md) - DDD 架构设计文档
 - [RUST_MIGRATION_PLAN.md](redata-app/backend/RUST_MIGRATION_PLAN.md) - Rust 迁移计划
 
-## 🔧 API 文档
-
-### Python 后端
-- Swagger UI: http://127.0.0.1:8000/docs
-- ReDoc: http://127.0.0.1:8000/redoc
-
-### Rust 后端
-- 健康检查: http://127.0.0.1:8001/health
-- 项目 API: http://127.0.0.1:8001/api/projects
-
 ## 🗄️ 数据库
 
-数据库文件位置：`redata-app/backend/data/app.db`
+数据库文件位置：`redata-app/src-tauri/data/app.db`
 
 首次运行时自动创建所有表结构。
 
@@ -188,10 +148,9 @@ npm run tauri:build
 
 - [Tauri](https://tauri.app/) - 桌面应用框架
 - [Nuxt](https://nuxt.com/) - Vue 全栈框架
-- [Axum](https://github.com/tokio-rs/axum) - Rust Web 框架
 - [SeaORM](https://www.sea-ql.org/SeaORM/) - Rust ORM
 
 ---
 
-**版本**: v2.4.0
+**版本**: v2.5.0
 **最后更新**: 2026-02-18
