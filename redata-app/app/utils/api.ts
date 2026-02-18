@@ -14,7 +14,15 @@ import type {
   ExcelPreview,
 } from '~/types'
 
-const API_BASE = 'http://127.0.0.1:8000/api'
+// 使用环境变量或默认值来选择后端
+// RUST_BACKEND=true 使用 Rust 后端（端口 8001）
+// 否则使用 Python 后端（端口 8000）
+const USE_RUST_BACKEND = process.env.RUST_BACKEND === 'true' || true // 临时默认使用 Rust 后端
+const API_BASE = USE_RUST_BACKEND
+  ? 'http://127.0.0.1:8001/api'
+  : 'http://127.0.0.1:8000/api'
+
+console.log(`Using ${USE_RUST_BACKEND ? 'Rust' : 'Python'} backend: ${API_BASE}`)
 
 // 通用请求函数
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
@@ -38,12 +46,12 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
 // ============ 项目 API ============
 
 export const projectsApi = {
-  list: () => request<Project[]>('/projects/'),
+  list: () => request<Project[]>('/projects'),
 
   get: (id: number) => request<Project>(`/projects/${id}`),
 
   create: (data: CreateProjectRequest) =>
-    request<Project>('/projects/', {
+    request<Project>('/projects', {
       method: 'POST',
       body: JSON.stringify(data),
     }),
@@ -117,7 +125,10 @@ export const aiConfigsApi = {
     }),
 
   testConnection: (id: number) =>
-    request<{ success: boolean; message: string }>(`/ai-configs/${id}/test-connection`),
+    request<{ success: boolean; message: string; response: string }>(`/ai-configs/test-connection`, {
+      method: 'POST',
+      body: JSON.stringify({ config_id: id }),
+    }),
 
   setDefault: (id: number) =>
     request<AiConfig>(`/ai-configs/${id}/set-default`, {
