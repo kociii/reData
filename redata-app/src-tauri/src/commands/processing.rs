@@ -795,6 +795,7 @@ async fn analyze_columns_with_ai(
         &user_prompt,
         temperature,
         max_tokens,
+        true,  // json_mode: 列映射需要返回 JSON
     ).await?;
 
     // 解析响应

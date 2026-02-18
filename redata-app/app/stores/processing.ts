@@ -291,8 +291,10 @@ export const useProcessingStore = defineStore('processing', () => {
             message: `任务状态已同步: ${task.status === 'completed' ? '已完成' : task.status}`,
             type: task.status === 'completed' ? 'success' : 'warning',
           })
-          // 更新阶段
+          // 更新阶段（确保所有阶段都完成）
           if (task.status === 'completed') {
+            updateTaskStage(taskId, 'preparing', 'completed')
+            updateTaskStage(taskId, 'ai_mapping', 'completed')
             updateTaskStage(taskId, 'importing', 'completed')
             updateTaskStage(taskId, 'done', 'completed')
           }
@@ -408,6 +410,9 @@ export const useProcessingStore = defineStore('processing', () => {
 
       case 'completed':
         if (taskId) {
+          // 任务完成时，确保所有阶段都标记为完成
+          updateTaskStage(taskId, 'preparing', 'completed')
+          updateTaskStage(taskId, 'ai_mapping', 'completed')
           updateTaskStage(taskId, 'importing', 'completed')
           updateTaskStage(taskId, 'done', 'completed')
         }

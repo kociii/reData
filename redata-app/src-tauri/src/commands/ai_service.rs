@@ -76,7 +76,7 @@ pub async fn analyze_column_mapping(
     let system_prompt = build_system_prompt();
     let user_prompt = build_user_prompt(&sheet_headers, &field_definitions, &sample_rows);
 
-    // 调用 AI
+    // 调用 AI（启用 JSON 模式，确保结构化输出）
     let response = call_ai(
         &config.api_url,
         &api_key,
@@ -85,6 +85,7 @@ pub async fn analyze_column_mapping(
         &user_prompt,
         config.temperature,
         config.max_tokens,
+        true,  // json_mode: 列映射需要返回 JSON
     ).await?;
 
     // 解析 AI 响应
@@ -136,6 +137,7 @@ pub async fn ai_generate_field_metadata(
         &user_prompt,
         0.1,  // 极低温度确保稳定输出
         50,   // 只需要几个词
+        false,  // json_mode: 字段名翻译只需纯文本
     ).await?;
 
     // 清理响应（去除可能的引号、空格、换行）

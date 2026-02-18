@@ -2,7 +2,12 @@
 //
 // 从 ai_service.rs 提取，供 ai_service.rs 和 processing.rs 共用
 
-/// 调用 AI API（OpenAI 兼容接口）
+/// 调用 AI API（OpenAI 兼容接口，支持阿里云结构化输出）
+///
+/// # 参数
+/// - `json_mode`: 是否启用 JSON 结构化输出模式（response_format: {"type": "json_object"}）
+///   - 启用后确保 AI 返回标准 JSON 格式
+///   - 注意：prompt 中必须包含 "JSON" 关键词（阿里云要求）
 pub async fn call_ai(
     api_url: &str,
     api_key: &str,
@@ -11,23 +16,32 @@ pub async fn call_ai(
     user_prompt: &str,
     temperature: f32,
     max_tokens: i32,
+    json_mode: bool,
 ) -> Result<String, String> {
     let client = reqwest::Client::new();
     let url = format!("{}/chat/completions", api_url.trim_end_matches('/'));
+
+    // 构建请求体
+    let mut body = serde_json::json!({
+        "model": model_name,
+        "messages": [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt}
+        ],
+        "temperature": temperature,
+        "max_tokens": max_tokens,
+    });
+
+    // 添加 JSON 结构化输出支持（阿里云/OpenAI 兼容）
+    if json_mode {
+        body["response_format"] = serde_json::json!({"type": "json_object"});
+    }
 
     let response = client
         .post(&url)
         .header("Authorization", format!("Bearer {}", api_key))
         .header("Content-Type", "application/json")
-        .json(&serde_json::json!({
-            "model": model_name,
-            "messages": [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt}
-            ],
-            "temperature": temperature,
-            "max_tokens": max_tokens,
-        }))
+        .json(&body)
         .timeout(std::time::Duration::from_secs(60))
         .send()
         .await
