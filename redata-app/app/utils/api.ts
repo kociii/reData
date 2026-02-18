@@ -480,6 +480,7 @@ export const resultsApi = {
       records: response.records.map(r => ({
         id: r.id,
         ...r.data,
+        raw_data: r.raw_data ?? null,  // 索引格式字符串：1:列1内容;2:列2内容;...
         source_file: r.source_file,
         source_sheet: r.source_sheet,
         batch_number: r.batch_number,

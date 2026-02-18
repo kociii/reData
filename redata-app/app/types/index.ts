@@ -216,7 +216,7 @@ export interface ProjectRecord {
   id: number
   project_id: number
   data: Record<string, any>  // key 为 field_id 字符串
-  raw_data: any[] | null  // 原始行数据
+  raw_data: string | null  // 索引格式字符串：1:列1内容;2:列2内容;...n:列n内容;
   source_file: string | null
   source_sheet: string | null
   row_number: number | null
@@ -248,4 +248,42 @@ export interface Batch {
 export interface ListTasksResponse {
   tasks: ProcessingTask[]
   total: number
+}
+
+// ── 数据处理进度类型 v2 ────────────────────────────────────────────────────────
+
+export type SheetPhase = 'waiting' | 'ai_analyzing' | 'importing' | 'done' | 'error'
+export type FilePhase = 'waiting' | 'processing' | 'done' | 'error'
+export type TaskPhase = 'starting' | 'processing' | 'paused' | 'completed' | 'cancelled' | 'error'
+
+export interface SheetProgress {
+  sheetName: string
+  phase: SheetPhase
+  aiConfidence: number | null    // 0-1，null=尚未完成 AI 分析
+  mappingCount: number | null    // 映射成功的字段数，null=尚未完成
+  errorMessage: string | null
+}
+
+export interface FileProgress {
+  fileName: string
+  phase: FilePhase
+  sheets: SheetProgress[]
+  totalRows: number
+  successCount: number
+  errorCount: number
+}
+
+export interface TaskProgress {
+  taskId: string
+  projectId: number
+  batchNumber: string | null
+  phase: TaskPhase
+  sourceFiles: string[]
+  files: FileProgress[]
+  totalRows: number
+  processedRows: number
+  successCount: number
+  errorCount: number
+  startedAt: string
+  completedAt: string | null
 }

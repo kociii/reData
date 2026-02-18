@@ -13,6 +13,14 @@ use serde::Serialize;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, LazyLock};
+
+/// 将一行数据格式化为索引字符串，格式：1:列1内容;2:列2内容;...n:列n内容;
+fn format_row_indexed(row: &[String]) -> String {
+    row.iter()
+        .enumerate()
+        .map(|(i, val)| format!("{}:{};", i + 1, val))
+        .collect()
+}
 use tauri::{AppHandle, Emitter};
 use tokio::sync::RwLock;
 
@@ -705,6 +713,17 @@ async fn process_single_file(
                 }
             }
 
+            // 检查必填字段是否在 AI 映射中完全缺失（AI 未能找到对应列）
+            let mapped_field_names: std::collections::HashSet<&str> = mapping_result.mappings
+                .iter()
+                .map(|m| m.field_name.as_str())
+                .collect();
+            for field in fields.iter().filter(|f| f.is_required) {
+                if !mapped_field_names.contains(field.field_name.as_str()) {
+                    validation_errors.push(format!("{} 为必填项（未找到对应列）", field.field_label));
+                }
+            }
+
             // 去重检查
             let is_duplicate = if dedup_enabled && !dedup_fields.is_empty() {
                 let mut dedup_values: HashMap<String, String> = HashMap::new();
@@ -794,13 +813,9 @@ fn build_request_preview(
     }
 
     if let Some(rows) = sample_rows {
-        preview.push_str("\n📊 样本数据:\n");
+        preview.push_str("\n📊 样本数据（列编号从1开始）:\n");
         for (i, row) in rows.iter().enumerate().take(3) {
-            let preview_row: Vec<&str> = row.iter().take(5).map(|s| s.as_str()).collect();
-            preview.push_str(&format!("  行 {}: {}\n", i, preview_row.join(" | ")));
-            if row.len() > 5 {
-                preview.push_str(&format!("       ... (共 {} 列)\n", row.len()));
-            }
+            preview.push_str(&format!("  行 {}: {}\n", i, format_row_indexed(row)));
         }
     }
 
@@ -839,7 +854,8 @@ async fn analyze_columns_with_ai_stream(
 
 注意：
 - header_row 从 0 开始计数，-1 表示没有表头
-- column_index 从 0 开始
+- column_index 从 0 开始（与"Excel 表头"中的 [0],[1],... 编号对应）
+- 样本数据中列编号从 1 开始（如 1:值;2:值;），这是显示格式，与 column_index 差 1
 - confidence 范围 0-1，表示匹配置信度
 - 如果某列无法匹配任何目标字段，放入 unmatched_columns"#;
 
@@ -862,9 +878,9 @@ async fn analyze_columns_with_ai_stream(
     }
 
     if let Some(rows) = sample_rows {
-        user_prompt.push_str("\n样本数据（前几行）：\n");
+        user_prompt.push_str("\n样本数据（前几行，列编号从1开始）：\n");
         for (i, row) in rows.iter().enumerate() {
-            user_prompt.push_str(&format!("  行 {}: {}\n", i, row.join(" | ")));
+            user_prompt.push_str(&format!("  行 {}: {}\n", i, format_row_indexed(row)));
         }
     }
 
@@ -997,10 +1013,8 @@ async fn insert_record(
     let data_str = serde_json::to_string(data)
         .map_err(|e| format!("JSON 序列化错误: {}", e))?;
 
-    // 序列化原始行数据
-    let raw_data_str = raw_data.map(|row| {
-        serde_json::to_string(row).unwrap_or_else(|_| "[]".to_string())
-    });
+    // 序列化原始行数据为索引格式：1:列1内容;2:列2内容;...n:列n内容;
+    let raw_data_str = raw_data.map(|row| format_row_indexed(row));
 
     let new_record = record::ActiveModel {
         project_id: Set(task.project_id),

@@ -1,11 +1,22 @@
 <template>
-  <div class="h-full flex flex-col -m-6">
+  <div class="h-full flex flex-col">
     <!-- 工具栏 -->
     <div class="flex justify-between items-center px-6 py-3 border-b border-default bg-elevated flex-shrink-0">
       <div class="flex items-center gap-4">
         <span class="text-sm text-muted">
           共 {{ totalCount }} 条记录
         </span>
+        <!-- 批次过滤提示 -->
+        <UBadge
+          v-if="batchFilter"
+          color="primary"
+          variant="subtle"
+          class="flex items-center gap-1 cursor-pointer"
+          @click="clearBatchFilter"
+        >
+          批次：{{ batchFilter }}
+          <UIcon name="i-lucide-x" class="w-3 h-3" />
+        </UBadge>
         <UInput
           v-model="searchQuery"
           icon="i-lucide-search"
@@ -90,12 +101,21 @@
               </div>
             </td>
             <td class="px-4 py-2.5 text-sm text-default" style="max-width: 300px;">
-              <div
-                v-if="record.raw_data && record.raw_data.length > 0"
-                class="font-mono text-xs whitespace-pre-wrap break-words bg-muted rounded p-1.5"
-                :title="formatRawData(record.raw_data)"
-              >
-                {{ truncateRawData(record.raw_data) }}
+              <div v-if="record.raw_data" class="flex items-start gap-2">
+                <div
+                  class="font-mono text-xs bg-muted rounded p-1.5 flex-1 overflow-hidden"
+                  style="display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; word-break: break-all;"
+                >
+                  {{ record.raw_data }}
+                </div>
+                <UButton
+                  size="xs"
+                  color="neutral"
+                  variant="ghost"
+                  @click="openRawDataModal(record.raw_data)"
+                >
+                  查看
+                </UButton>
               </div>
               <span v-else class="text-dimmed">-</span>
             </td>
@@ -118,6 +138,29 @@
         size="sm"
       />
     </div>
+
+    <!-- 原始数据详情弹窗 -->
+    <UModal v-model:open="rawDataModalOpen">
+      <template #content>
+        <div class="p-4">
+          <div class="flex items-center justify-between mb-3">
+            <h3 class="text-base font-medium">原始数据</h3>
+            <UButton
+              icon="i-lucide-x"
+              color="neutral"
+              variant="ghost"
+              size="sm"
+              @click="rawDataModalOpen = false"
+            />
+          </div>
+          <div
+            class="font-mono text-xs bg-muted rounded p-3 max-h-96 overflow-auto whitespace-pre-wrap break-words"
+          >
+            {{ rawDataModalContent }}
+          </div>
+        </div>
+      </template>
+    </UModal>
   </div>
 </template>
 
@@ -127,8 +170,16 @@ import { useFieldStore } from '~/stores/field'
 import { resultsApi } from '~/utils/api'
 
 const route = useRoute()
+const router = useRouter()
 const projectId = computed(() => Number(route.params.id))
 const fieldStore = useFieldStore()
+
+// 批次过滤（从路由查询参数获取）
+const batchFilter = computed(() => route.query.batch as string | undefined)
+
+function clearBatchFilter() {
+  router.push(`/project/${projectId.value}/results`)
+}
 
 // 数据状态
 const loading = ref(false)
@@ -144,18 +195,13 @@ let searchTimeout: ReturnType<typeof setTimeout> | null = null
 // 字段定义
 const fields = computed(() => fieldStore.fields)
 
-// 格式化原始数据（用于 tooltip）
-function formatRawData(rawData: string[]): string {
-  return rawData.join(' | ')
-}
+// 原始数据弹窗
+const rawDataModalOpen = ref(false)
+const rawDataModalContent = ref('')
 
-// 截断原始数据显示
-function truncateRawData(rawData: string[]): string {
-  const joined = rawData.map((cell, i) => `[${i}] ${cell}`).join('\n')
-  if (joined.length > 500) {
-    return joined.slice(0, 500) + '...'
-  }
-  return joined
+function openRawDataModal(rawData: string) {
+  rawDataModalContent.value = rawData
+  rawDataModalOpen.value = true
 }
 
 // 导出
@@ -182,12 +228,10 @@ async function loadData() {
       page_size: pageSize,
       search: searchQuery.value || undefined,
       status: 'success',
+      batch_number: batchFilter.value,
     })
-    // 解析 raw_data JSON
-    records.value = result.records.map((r: any) => ({
-      ...r,
-      raw_data: r.raw_data ? JSON.parse(r.raw_data) : null,
-    }))
+    // raw_data 为索引格式字符串：1:列1内容;2:列2内容;...n:列n内容;
+    records.value = result.records
     totalCount.value = result.total
   } catch (error) {
     console.error('Failed to load data:', error)
@@ -199,6 +243,10 @@ async function loadData() {
 }
 
 watch(currentPage, () => loadData())
+watch(batchFilter, () => {
+  currentPage.value = 1
+  loadData()
+})
 watch(searchQuery, () => {
   // 防抖：延迟 300ms 后执行搜索
   if (searchTimeout) clearTimeout(searchTimeout)

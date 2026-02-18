@@ -1,113 +1,174 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
-import type { ProcessingTask, ProcessingProgress, PendingFile, LogEntry, ProcessingStage } from '~/types'
+import type {
+  TaskProgress, FileProgress, SheetProgress,
+  ProcessingProgress, TaskPhase, FilePhase, SheetPhase,
+} from '~/types'
 import { processingApi } from '~/utils/api'
 
 export const useProcessingStore = defineStore('processing', () => {
-  // State
-  const tasks = ref<ProcessingTask[]>([])
-  const activeTask = ref<ProcessingTask | null>(null)
-  const progress = ref<ProcessingProgress | null>(null)
+  // ── State ─────────────────────────────────────────────────────────────────────
+  // 使用 Map 存储任务，taskIds 保持有序（新任务在前）
+  const taskMap = ref<Map<string, TaskProgress>>(new Map())
+  const taskIds = ref<string[]>([])
+  const selectedTaskId = ref<string | null>(null)
   const loading = ref(false)
   const error = ref<string | null>(null)
-  const currentProjectId = ref<number | null>(null)  // 当前项目 ID
+  const currentProjectId = ref<number | null>(null)
 
-  // 新增：待处理文件列表
-  const pendingFiles = ref<PendingFile[]>([])
+  // 追踪每个任务当前正在处理的文件/Sheet（row_processed 事件不携带此信息）
+  const activeLocation = ref<Map<string, { file: string; sheet: string }>>(new Map())
 
-  // 新增：实时日志记录
-  const logs = ref<LogEntry[]>([])
+  // 追踪每个文件开始处理时的累计基线（用于从 file_complete 的累计值计算单文件统计）
+  // key: `${taskId}:${fileName}`
+  const fileBaseline = ref<Map<string, { success: number; error: number; processed: number }>>(new Map())
 
-  // Tauri 事件监听器
+  // Tauri 事件监听器清理函数
   let unlistenProgress: (() => void) | null = null
 
-  // 新增：选中的任务 ID（右侧面板展示）
-  const selectedTaskId = ref<string | null>(null)
+  // ── Map 响应式辅助函数 ────────────────────────────────────────────────────────
+  // 每次更新都创建新 Map 对象，确保 Vue 追踪到变化
 
-  // 新增：每个任务的处理阶段 Map<taskId, ProcessingStage[]>
-  const taskStages = ref<Map<string, ProcessingStage[]>>(new Map())
+  function setTask(task: TaskProgress) {
+    const newMap = new Map(taskMap.value)
+    newMap.set(task.taskId, task)
+    taskMap.value = newMap
+  }
 
-  // 新增：每个任务的独立日志 Map<taskId, LogEntry[]>（状态隔离）
-  const taskLogs = ref<Map<string, LogEntry[]>>(new Map())
+  function updateTask(taskId: string, updater: (task: TaskProgress) => TaskProgress) {
+    const task = taskMap.value.get(taskId)
+    if (!task) return
+    setTask(updater({ ...task }))
+  }
 
-  // 新增：多选的任务 ID
-  const selectedTaskIds = ref<Set<string>>(new Set())
+  function updateFile(taskId: string, fileName: string, updater: (file: FileProgress) => FileProgress) {
+    const task = taskMap.value.get(taskId)
+    if (!task) return
+    const idx = task.files.findIndex(f => f.fileName === fileName)
+    if (idx === -1) return
+    const newFiles = [...task.files]
+    newFiles[idx] = updater({ ...newFiles[idx] })
+    setTask({ ...task, files: newFiles })
+  }
 
-  // 新增：分组折叠状态
-  const collapsedGroups = ref<Set<string>>(new Set())
+  function updateSheet(
+    taskId: string,
+    fileName: string,
+    sheetName: string,
+    updater: (sheet: SheetProgress) => SheetProgress,
+  ) {
+    const task = taskMap.value.get(taskId)
+    if (!task) return
+    const fileIdx = task.files.findIndex(f => f.fileName === fileName)
+    if (fileIdx === -1) return
+    const file = task.files[fileIdx]
+    const sheetIdx = file.sheets.findIndex(s => s.sheetName === sheetName)
+    if (sheetIdx === -1) return
+    const newSheets = [...file.sheets]
+    newSheets[sheetIdx] = updater({ ...newSheets[sheetIdx] })
+    const newFiles = [...task.files]
+    newFiles[fileIdx] = { ...file, sheets: newSheets }
+    setTask({ ...task, files: newFiles })
+  }
 
-  // Getters
-  // 待处理任务（pending 状态）
-  const pendingTasks = computed(() =>
-    tasks.value.filter(t => t.status === 'pending')
+  function setActiveLocation(taskId: string, file: string, sheet: string) {
+    const newMap = new Map(activeLocation.value)
+    newMap.set(taskId, { file, sheet })
+    activeLocation.value = newMap
+  }
+
+  // ── 状态映射辅助 ──────────────────────────────────────────────────────────────
+
+  function mapStatusToPhase(status: string): TaskPhase {
+    const map: Record<string, TaskPhase> = {
+      pending: 'starting',
+      processing: 'processing',
+      paused: 'paused',
+      completed: 'completed',
+      cancelled: 'cancelled',
+      error: 'error',
+    }
+    return map[status] ?? 'processing'
+  }
+
+  function mapStatusToFilePhase(status: string): FilePhase {
+    if (status === 'completed') return 'done'
+    if (status === 'error') return 'error'
+    return 'waiting'
+  }
+
+  // ── Getters ───────────────────────────────────────────────────────────────────
+
+  const tasks = computed(() =>
+    taskIds.value.map(id => taskMap.value.get(id)!).filter(Boolean),
   )
-  // 处理中任务（processing, paused, queued）
-  const processingTasks = computed(() =>
-    tasks.value.filter(t => t.status === 'processing' || t.status === 'paused' || t.status === 'queued')
+  const activeTasks = computed(() =>
+    tasks.value.filter(t => t.phase === 'processing' || t.phase === 'paused'),
   )
-  // 已完成任务（completed, cancelled）
   const completedTasks = computed(() =>
-    tasks.value.filter(t => t.status === 'completed' || t.status === 'cancelled')
+    tasks.value.filter(t => ['completed', 'cancelled', 'error'].includes(t.phase)),
   )
-  // 兼容旧代码
-  const activeTasks = computed(() => processingTasks.value)
-  const hasActiveTasks = computed(() => processingTasks.value.length > 0)
-  const hasPendingFiles = computed(() => pendingFiles.value.length > 0)
+  const hasActiveTasks = computed(() => activeTasks.value.length > 0)
   const selectedTask = computed(() =>
-    selectedTaskId.value ? tasks.value.find(t => t.id === selectedTaskId.value) : null
-  )
-  const selectedStages = computed(() =>
-    selectedTaskId.value ? taskStages.value.get(selectedTaskId.value) || createDefaultStages() : createDefaultStages()
-  )
-  // 选中任务的独立日志
-  const selectedLogs = computed(() =>
-    selectedTaskId.value ? taskLogs.value.get(selectedTaskId.value) || [] : []
+    selectedTaskId.value ? (taskMap.value.get(selectedTaskId.value) ?? null) : null,
   )
 
-  // Actions
+  // ── Actions ───────────────────────────────────────────────────────────────────
+
+  function selectTask(taskId: string | null) {
+    selectedTaskId.value = taskId
+  }
+
   async function fetchTasks(projectId: number) {
     // 切换项目时清理旧状态
     if (currentProjectId.value !== null && currentProjectId.value !== projectId) {
       stopEventListener()
-      tasks.value = []
-      logs.value = []
-      pendingFiles.value = []
+      taskMap.value = new Map()
+      taskIds.value = []
       selectedTaskId.value = null
-      taskStages.value.clear()
-      activeTask.value = null
-      progress.value = null
     }
     currentProjectId.value = projectId
-
     loading.value = true
     error.value = null
     try {
       const response = await processingApi.list(projectId)
-      tasks.value = response.tasks.map(task => ({
-        ...task,
-        id: task.task_id,
-      }))
+      const newMap = new Map<string, TaskProgress>()
+      const ids: string[] = []
 
-      // 为已完成/已取消的任务初始化阶段状态
-      tasks.value.forEach(task => {
-        if (!taskStages.value.has(task.id)) {
-          if (task.status === 'completed' || task.status === 'cancelled') {
-            // 所有阶段都标记为完成
-            const completedStages = createDefaultStages().map(s => ({
-              ...s,
-              status: 'completed' as const
-            }))
-            taskStages.value.set(task.id, completedStages)
-          } else if (task.status === 'error') {
-            // 错误状态保持默认
-            initTaskStages(task.id)
-          }
+      for (const task of response.tasks) {
+        const taskProgress: TaskProgress = {
+          taskId: task.task_id,
+          projectId: task.project_id,
+          batchNumber: task.batch_number,
+          phase: mapStatusToPhase(task.status),
+          sourceFiles: task.source_files || [],
+          files: (task.source_files || []).map(fileName => ({
+            fileName,
+            phase: mapStatusToFilePhase(task.status),
+            sheets: [],
+            totalRows: 0,
+            successCount: 0,
+            errorCount: 0,
+          })),
+          totalRows: task.total_rows,
+          processedRows: task.processed_rows,
+          successCount: task.success_count,
+          errorCount: task.error_count,
+          startedAt: task.started_at || new Date().toISOString(),
+          completedAt: task.status === 'completed' ? new Date().toISOString() : null,
         }
-      })
-    } catch (e: any) {
+        newMap.set(task.task_id, taskProgress)
+        ids.push(task.task_id)
+      }
+
+      taskMap.value = newMap
+      taskIds.value = ids
+    }
+    catch (e: any) {
       error.value = e.message
       console.error('Failed to fetch tasks:', e)
-    } finally {
+    }
+    finally {
       loading.value = false
     }
   }
@@ -120,340 +181,316 @@ export const useProcessingStore = defineStore('processing', () => {
         project_id: projectId,
         file_paths: filePaths,
       })
-      // 提取源文件名
-      const sourceFileNames = filePaths.map(p => {
+
+      const sourceFileNames = filePaths.map((p) => {
         const parts = p.split(/[/\\]/)
         return parts[parts.length - 1] || p
       })
-      // 添加 id 字段
-      const taskWithId: ProcessingTask = {
-        id: task.task_id,
-        task_id: task.task_id,
-        project_id: task.project_id,
-        status: task.status,
-        total_files: filePaths.length,
-        processed_files: 0,
-        total_rows: 0,
-        processed_rows: 0,
-        success_count: 0,
-        error_count: 0,
-        batch_number: task.batch_number,
-        source_files: task.source_files || sourceFileNames,
+
+      const taskProgress: TaskProgress = {
+        taskId: task.task_id,
+        projectId: task.project_id,
+        batchNumber: task.batch_number,
+        phase: 'processing',
+        sourceFiles: task.source_files || sourceFileNames,
+        files: (task.source_files || sourceFileNames).map(fileName => ({
+          fileName,
+          phase: 'waiting',
+          sheets: [],
+          totalRows: 0,
+          successCount: 0,
+          errorCount: 0,
+        })),
+        totalRows: 0,
+        processedRows: 0,
+        successCount: 0,
+        errorCount: 0,
+        startedAt: new Date().toISOString(),
+        completedAt: null,
       }
-      tasks.value.unshift(taskWithId)
-      activeTask.value = taskWithId
-      // 初始化阶段并选中
-      initTaskStages(task.task_id)
-      updateTaskStage(task.task_id, 'preparing', 'active')
+
+      setTask(taskProgress)
+      taskIds.value = [task.task_id, ...taskIds.value]
       selectedTaskId.value = task.task_id
-      return taskWithId
-    } catch (e: any) {
+      return taskProgress
+    }
+    catch (e: any) {
       error.value = e.message
-      console.error('Failed to start processing:', e)
       throw e
-    } finally {
+    }
+    finally {
       loading.value = false
     }
   }
 
   async function pauseTask(taskId: string) {
-    loading.value = true
-    error.value = null
     try {
       await processingApi.pause(taskId)
-      const taskIndex = tasks.value.findIndex(t => t.id === taskId)
-      if (taskIndex !== -1) {
-        tasks.value[taskIndex].status = 'paused'
-      }
-    } catch (e: any) {
+      updateTask(taskId, task => ({ ...task, phase: 'paused' }))
+    }
+    catch (e: any) {
       error.value = e.message
-      console.error('Failed to pause task:', e)
       throw e
-    } finally {
-      loading.value = false
     }
   }
 
   async function resumeTask(taskId: string) {
-    loading.value = true
-    error.value = null
     try {
       await processingApi.resume(taskId)
-      const taskIndex = tasks.value.findIndex(t => t.id === taskId)
-      if (taskIndex !== -1) {
-        tasks.value[taskIndex].status = 'processing'
-      }
-    } catch (e: any) {
+      updateTask(taskId, task => ({ ...task, phase: 'processing' }))
+    }
+    catch (e: any) {
       error.value = e.message
-      console.error('Failed to resume task:', e)
       throw e
-    } finally {
-      loading.value = false
     }
   }
 
   async function cancelTask(taskId: string) {
-    loading.value = true
-    error.value = null
     try {
       await processingApi.cancel(taskId)
-      const taskIndex = tasks.value.findIndex(t => t.id === taskId)
-      if (taskIndex !== -1) {
-        tasks.value[taskIndex].status = 'cancelled'
-      }
-    } catch (e: any) {
+      updateTask(taskId, task => ({ ...task, phase: 'cancelled' }))
+    }
+    catch (e: any) {
       error.value = e.message
-      console.error('Failed to cancel task:', e)
       throw e
-    } finally {
-      loading.value = false
     }
   }
 
-  function updateProgress(progressData: ProcessingProgress) {
-    progress.value = progressData
+  // ── 进度事件处理 ──────────────────────────────────────────────────────────────
 
-    // 更新任务列表中的对应任务
-    const taskIndex = tasks.value.findIndex(t => t.id === progressData.task_id)
-    if (taskIndex !== -1) {
-      const task = tasks.value[taskIndex]
-      const newProgress = progressData.total_rows
-        ? Math.round((progressData.processed_rows || 0) / progressData.total_rows * 100)
-        : 0
+  function handleProgressEvent(data: ProcessingProgress) {
+    console.log('[Processing] Event:', data.event, data.task_id)
+    const taskId = data.task_id
+    if (!taskId) return
 
-      tasks.value[taskIndex] = {
-        ...task,
-        progress: newProgress,
-        processed_rows: progressData.processed_rows ?? task.processed_rows,
-        total_rows: progressData.total_rows ?? task.total_rows,
-        success_count: progressData.success_count ?? task.success_count,
-        error_count: progressData.error_count ?? task.error_count,
-        status: progressData.event === 'completed' ? 'completed'
-          : progressData.event === 'error' ? 'error'
-          : task.status,
+    switch (data.event) {
+      case 'file_start': {
+        const fileName = data.current_file!
+        const task = taskMap.value.get(taskId)
+        if (!task) break
+
+        // 记录此文件开始时的累计基线，用于后续计算单文件统计
+        const baselineMap = new Map(fileBaseline.value)
+        baselineMap.set(`${taskId}:${fileName}`, {
+          success: task.successCount,
+          error: task.errorCount,
+          processed: task.processedRows,
+        })
+        fileBaseline.value = baselineMap
+
+        const existingIdx = task.files.findIndex(f => f.fileName === fileName)
+        if (existingIdx !== -1) {
+          updateFile(taskId, fileName, f => ({ ...f, phase: 'processing' }))
+        }
+        else {
+          updateTask(taskId, t => ({
+            ...t,
+            files: [...t.files, {
+              fileName,
+              phase: 'processing',
+              sheets: [],
+              totalRows: 0,
+              successCount: 0,
+              errorCount: 0,
+            }],
+          }))
+        }
+        break
       }
-    }
-  }
 
-  function updateTaskInList(task: ProcessingTask) {
-    const index = tasks.value.findIndex(t => t.id === task.id)
-    if (index !== -1) {
-      tasks.value[index] = task
-    }
-    if (activeTask.value?.id === task.id) {
-      activeTask.value = task
-    }
-  }
+      case 'sheet_start': {
+        const fileName = data.current_file!
+        const sheetName = data.current_sheet!
+        setActiveLocation(taskId, fileName, sheetName)
 
-  // 待处理文件管理
-  function addPendingFile(file: PendingFile) {
-    // 避免重复添加
-    if (!pendingFiles.value.find(f => f.path === file.path)) {
-      pendingFiles.value.push(file)
-    }
-  }
+        const task = taskMap.value.get(taskId)
+        if (!task) break
+        const fileIdx = task.files.findIndex(f => f.fileName === fileName)
+        if (fileIdx === -1) break
+        const file = task.files[fileIdx]
+        const existingSheetIdx = file.sheets.findIndex(s => s.sheetName === sheetName)
 
-  function addPendingFiles(files: PendingFile[]) {
-    files.forEach(file => addPendingFile(file))
-  }
-
-  function removePendingFile(fileId: string) {
-    const index = pendingFiles.value.findIndex(f => f.id === fileId)
-    if (index !== -1) {
-      pendingFiles.value.splice(index, 1)
-    }
-  }
-
-  function clearPendingFiles() {
-    pendingFiles.value = []
-  }
-
-  // 日志管理
-  // 添加日志到全局日志（兼容旧代码）
-  function addLog(log: LogEntry) {
-    logs.value.push(log)
-    // 保持最近 200 条日志
-    if (logs.value.length > 200) {
-      logs.value.shift()
-    }
-  }
-
-  // 添加日志到指定任务（状态隔离）
-  function addTaskLog(taskId: string, log: LogEntry) {
-    // 同时更新全局日志（兼容）
-    addLog(log)
-
-    // 更新任务独立日志
-    const taskLogList = taskLogs.value.get(taskId) || []
-    taskLogList.push(log)
-    // 每个任务保持最近 500 条日志
-    if (taskLogList.length > 500) {
-      taskLogList.shift()
-    }
-    taskLogs.value.set(taskId, [...taskLogList])
-  }
-
-  function clearLogs() {
-    logs.value = []
-  }
-
-  function clearTaskLogs(taskId: string) {
-    taskLogs.value.set(taskId, [])
-  }
-
-  // 初始化任务日志
-  function initTaskLogs(taskId: string) {
-    if (!taskLogs.value.has(taskId)) {
-      taskLogs.value.set(taskId, [])
-    }
-  }
-
-  // 阶段管理
-  function createDefaultStages(): ProcessingStage[] {
-    return [
-      { key: 'preparing', label: '准备中', status: 'pending' },
-      { key: 'ai_mapping', label: 'AI 识别', status: 'pending' },
-      { key: 'importing', label: '数据导入', status: 'pending' },
-      { key: 'done', label: '处理完成', status: 'pending' },
-    ]
-  }
-
-  function initTaskStages(taskId: string) {
-    taskStages.value.set(taskId, createDefaultStages())
-    initTaskLogs(taskId)
-  }
-
-  function updateTaskStage(taskId: string, stageKey: string, status: ProcessingStage['status']) {
-    const stages = taskStages.value.get(taskId)
-    if (!stages) return
-    const stageIndex = stages.findIndex(s => s.key === stageKey)
-    if (stageIndex !== -1) {
-      // 创建新数组以确保 Vue 响应式更新
-      const newStages = [...stages]
-      newStages[stageIndex] = { ...newStages[stageIndex], status }
-      taskStages.value.set(taskId, newStages)
-    }
-  }
-
-  function selectTask(taskId: string | null) {
-    selectedTaskId.value = taskId
-  }
-
-  // 多选管理
-  function toggleTaskSelection(taskId: string) {
-    if (selectedTaskIds.value.has(taskId)) {
-      selectedTaskIds.value.delete(taskId)
-    } else {
-      selectedTaskIds.value.add(taskId)
-    }
-    // 触发响应式更新
-    selectedTaskIds.value = new Set(selectedTaskIds.value)
-  }
-
-  function selectAllTasks(taskIds: string[]) {
-    taskIds.forEach(id => selectedTaskIds.value.add(id))
-    selectedTaskIds.value = new Set(selectedTaskIds.value)
-  }
-
-  function deselectAllTasks() {
-    selectedTaskIds.value = new Set()
-  }
-
-  function isSelected(taskId: string): boolean {
-    return selectedTaskIds.value.has(taskId)
-  }
-
-  // 分组折叠管理
-  function toggleGroupCollapse(group: string) {
-    if (collapsedGroups.value.has(group)) {
-      collapsedGroups.value.delete(group)
-    } else {
-      collapsedGroups.value.add(group)
-    }
-    collapsedGroups.value = new Set(collapsedGroups.value)
-  }
-
-  function isGroupCollapsed(group: string): boolean {
-    return collapsedGroups.value.has(group)
-  }
-
-  // 批量操作
-  async function batchPauseTasks(taskIds: string[]) {
-    for (const taskId of taskIds) {
-      try {
-        await pauseTask(taskId)
-      } catch (e) {
-        console.error('Failed to pause task:', taskId, e)
+        if (existingSheetIdx !== -1) {
+          updateSheet(taskId, fileName, sheetName, s => ({ ...s, phase: 'ai_analyzing' }))
+        }
+        else {
+          updateFile(taskId, fileName, f => ({
+            ...f,
+            sheets: [...f.sheets, {
+              sheetName,
+              phase: 'ai_analyzing',
+              aiConfidence: null,
+              mappingCount: null,
+              errorMessage: null,
+            }],
+          }))
+        }
+        break
       }
-    }
-  }
 
-  async function batchResumeTasks(taskIds: string[]) {
-    for (const taskId of taskIds) {
-      try {
-        await resumeTask(taskId)
-      } catch (e) {
-        console.error('Failed to resume task:', taskId, e)
+      case 'ai_analyzing':
+        // sheet_start 已设置 ai_analyzing 阶段，此处无需额外操作
+        break
+
+      case 'ai_request':
+      case 'ai_response':
+        // 完全丢弃，不做任何 UI 处理
+        break
+
+      case 'column_mapping': {
+        const sheetName = data.current_sheet!
+        const loc = activeLocation.value.get(taskId)
+        if (!loc) break
+        updateSheet(taskId, loc.file, sheetName, s => ({
+          ...s,
+          phase: 'importing',
+          aiConfidence: data.confidence ?? null,
+          mappingCount: data.mappings ? Object.keys(data.mappings).length : null,
+        }))
+        break
       }
-    }
-  }
 
-  async function batchCancelTasks(taskIds: string[]) {
-    for (const taskId of taskIds) {
-      try {
-        await cancelTask(taskId)
-      } catch (e) {
-        console.error('Failed to cancel task:', taskId, e)
+      case 'row_processed': {
+        // row_processed 携带的是当前文件内的局部计数（非累计），需加上基线得到任务级累计
+        const localProcessed = data.processed_rows ?? 0
+        const localSuccess = data.success_count ?? 0
+        const localError = data.error_count ?? 0
+        const loc = activeLocation.value.get(taskId)
+        const baseline = loc ? fileBaseline.value.get(`${taskId}:${loc.file}`) : null
+        updateTask(taskId, t => ({
+          ...t,
+          processedRows: (baseline?.processed ?? 0) + localProcessed,
+          successCount: (baseline?.success ?? 0) + localSuccess,
+          errorCount: (baseline?.error ?? 0) + localError,
+        }))
+        break
       }
+
+      case 'sheet_complete': {
+        const sheetName = data.current_sheet!
+        const loc = activeLocation.value.get(taskId)
+        if (!loc) break
+        updateSheet(taskId, loc.file, sheetName, s => ({ ...s, phase: 'done' }))
+        break
+      }
+
+      case 'file_complete': {
+        const fileName = data.current_file!
+        // file_complete 发送的是累计值（跨所有已处理文件），需减去此文件的基线得到单文件统计
+        const cumulativeSuccess = data.success_count ?? 0
+        const cumulativeError = data.error_count ?? 0
+        const cumulativeProcessed = data.processed_rows ?? 0
+        const baseline = fileBaseline.value.get(`${taskId}:${fileName}`)
+        const fileSuccess = cumulativeSuccess - (baseline?.success ?? 0)
+        const fileError = cumulativeError - (baseline?.error ?? 0)
+        updateFile(taskId, fileName, f => ({
+          ...f,
+          phase: 'done',
+          totalRows: fileSuccess + fileError,
+          successCount: fileSuccess,
+          errorCount: fileError,
+        }))
+        updateTask(taskId, t => ({
+          ...t,
+          processedRows: cumulativeProcessed,
+          successCount: cumulativeSuccess,
+          errorCount: cumulativeError,
+        }))
+        break
+      }
+
+      case 'completed': {
+        const successCount = data.success_count ?? 0
+        const errorCount = data.error_count ?? 0
+        updateTask(taskId, t => ({
+          ...t,
+          phase: 'completed',
+          processedRows: data.processed_rows ?? t.processedRows,
+          successCount,
+          errorCount,
+          completedAt: new Date().toISOString(),
+          files: t.files.map(f => ({
+            ...f,
+            phase: 'done' as FilePhase,
+            sheets: f.sheets.map(s => ({ ...s, phase: 'done' as SheetPhase })),
+          })),
+        }))
+        break
+      }
+
+      case 'error': {
+        const fileName = data.current_file
+        const loc = activeLocation.value.get(taskId)
+        if (fileName) {
+          // 文件级错误
+          updateFile(taskId, fileName, f => ({ ...f, phase: 'error' }))
+        }
+        else if (loc) {
+          // Sheet 级错误
+          updateSheet(taskId, loc.file, loc.sheet, s => ({
+            ...s,
+            phase: 'error',
+            errorMessage: data.message ?? null,
+          }))
+        }
+        else {
+          // 任务级错误
+          updateTask(taskId, t => ({ ...t, phase: 'error' }))
+        }
+        break
+      }
+
+      default:
+        break
     }
   }
 
-  // 从 API 同步任务状态（兜底机制，防止 WebSocket 丢失事件）
+  // ── Tauri 事件监听 ────────────────────────────────────────────────────────────
+
+  async function startEventListener() {
+    if (unlistenProgress) return
+    try {
+      unlistenProgress = await processingApi.onProgress(handleProgressEvent)
+      console.log('[Processing] Event listener started')
+    }
+    catch (e) {
+      console.error('[Processing] Failed to start event listener:', e)
+    }
+  }
+
+  function stopEventListener() {
+    if (unlistenProgress) {
+      unlistenProgress()
+      unlistenProgress = null
+      console.log('[Processing] Event listener stopped')
+    }
+  }
+
+  // ── 状态轮询（兜底机制，防止事件丢失）────────────────────────────────────────
+
+  let pollTimer: ReturnType<typeof setInterval> | null = null
+
   async function syncTaskStatus(taskId: string) {
     try {
       const task = await processingApi.status(taskId)
-      const taskWithId = { ...task, id: task.task_id }
-      const index = tasks.value.findIndex(t => t.id === taskId)
-      if (index !== -1) {
-        const existing = tasks.value[index]
-        tasks.value[index] = {
-          ...existing,
-          ...taskWithId,
-          progress: existing.progress, // 保留前端计算的进度
-        }
-        // 如果后端已完成但前端还在 processing，更新状态并断开 WS
-        if (
-          (task.status === 'completed' || task.status === 'cancelled' || task.status === 'error') &&
-          (existing.status === 'processing' || existing.status === 'paused')
-        ) {
-          tasks.value[index].status = task.status as any
-          addLog({
-            time: new Date().toLocaleTimeString('zh-CN'),
-            message: `任务状态已同步: ${task.status === 'completed' ? '已完成' : task.status}`,
-            type: task.status === 'completed' ? 'success' : 'warning',
-          })
-          // 更新阶段（确保所有阶段都完成）
-          if (task.status === 'completed') {
-            updateTaskStage(taskId, 'preparing', 'completed')
-            updateTaskStage(taskId, 'ai_mapping', 'completed')
-            updateTaskStage(taskId, 'importing', 'completed')
-            updateTaskStage(taskId, 'done', 'completed')
-          }
-        }
-      }
-    } catch {
+      updateTask(taskId, existing => ({
+        ...existing,
+        phase: mapStatusToPhase(task.status),
+        totalRows: task.total_rows,
+        processedRows: task.processed_rows,
+        successCount: task.success_count,
+        errorCount: task.error_count,
+      }))
+    }
+    catch {
       // 静默失败，不影响主流程
     }
   }
 
-  // 定期轮询活动任务状态（每 10 秒）
-  let pollTimer: ReturnType<typeof setInterval> | null = null
-
   function startStatusPolling() {
     stopStatusPolling()
     pollTimer = setInterval(() => {
-      const active = tasks.value.filter(t => t.status === 'processing' || t.status === 'paused')
-      active.forEach(task => syncTaskStatus(task.id))
+      activeTasks.value.forEach(task => syncTaskStatus(task.taskId))
     }, 10000)
   }
 
@@ -464,276 +501,37 @@ export const useProcessingStore = defineStore('processing', () => {
     }
   }
 
-  // Tauri 事件监听
-  async function startEventListener() {
-    if (unlistenProgress) return // 已监听
-
-    try {
-      unlistenProgress = await processingApi.onProgress((data) => {
-        handleProgressEvent(data)
-      })
-      console.log('[Processing] Started event listener')
-    } catch (e) {
-      console.error('[Processing] Failed to start event listener:', e)
-    }
-  }
-
-  function stopEventListener() {
-    if (unlistenProgress) {
-      unlistenProgress()
-      unlistenProgress = null
-      console.log('[Processing] Stopped event listener')
-    }
-  }
-
-  function handleProgressEvent(data: ProcessingProgress) {
-    console.log('[Processing] Received event:', data.event, data.task_id)
-    const taskId = data.task_id
-    // 确保阶段已初始化
-    if (taskId && !taskStages.value.has(taskId)) {
-      initTaskStages(taskId)
-    }
-
-    // 辅助函数：添加日志到指定任务
-    const addLogForTask = (log: LogEntry) => {
-      if (taskId) {
-        addTaskLog(taskId, log)
-      } else {
-        addLog(log)
-      }
-    }
-
-    switch (data.event) {
-      case 'file_start':
-      case 'sheet_start':
-        if (taskId) {
-          updateTaskStage(taskId, 'preparing', 'completed')
-          updateTaskStage(taskId, 'ai_mapping', 'active')
-        }
-        addLogForTask({
-          time: new Date().toLocaleTimeString('zh-CN'),
-          message: data.message || `开始处理: ${data.current_sheet || data.current_file || ''}`,
-          type: 'info',
-          align: 'left',
-        })
-        break
-
-      case 'column_mapping':
-        if (taskId) {
-          updateTaskStage(taskId, 'ai_mapping', 'completed')
-          updateTaskStage(taskId, 'importing', 'active')
-        }
-        addLogForTask({
-          time: new Date().toLocaleTimeString('zh-CN'),
-          message: `AI 列映射完成 (置信度: ${((data.confidence || 0) * 100).toFixed(0)}%)`,
-          type: 'success',
-          align: 'left',
-        })
-        break
-
-      case 'ai_analyzing':
-        addLogForTask({
-          time: new Date().toLocaleTimeString('zh-CN'),
-          message: data.message || 'AI 分析中...',
-          type: 'info',
-          align: 'left',
-          category: 'ai',
-        })
-        break
-
-      case 'ai_request':
-        // 显示发送给 AI 的请求内容
-        if (data.message) {
-          addLogForTask({
-            time: new Date().toLocaleTimeString('zh-CN'),
-            message: data.message,
-            type: 'info',
-            align: 'left',
-            category: 'ai_request',
-          })
-        }
-        break
-
-      case 'ai_response':
-        // AI 流式响应（追加到上一条 AI 日志）
-        if (taskId && data.message) {
-          const taskLogList = taskLogs.value.get(taskId) || []
-          // 查找最后一条 AI 类型的日志
-          const lastAiLogIndex = taskLogList.findLastIndex(l => l.category === 'ai')
-          if (lastAiLogIndex >= 0) {
-            // 追加到最后一条日志
-            taskLogList[lastAiLogIndex] = {
-              ...taskLogList[lastAiLogIndex],
-              message: taskLogList[lastAiLogIndex].message + data.message,
-            }
-            taskLogs.value.set(taskId, [...taskLogList])
-          } else {
-            // 没有找到 AI 日志，创建新的
-            addLogForTask({
-              time: new Date().toLocaleTimeString('zh-CN'),
-              message: data.message,
-              type: 'info',
-              align: 'left',
-              category: 'ai',
-            })
-          }
-        }
-        break
-
-      case 'row_processed':
-        updateProgress(data)
-        // 每 50 行记录一次日志，避免刷屏
-        if (data.processed_rows && data.processed_rows % 50 === 0) {
-          addLogForTask({
-            time: new Date().toLocaleTimeString('zh-CN'),
-            message: `导入进度: ${data.processed_rows}/${data.total_rows}`,
-            type: 'info',
-            align: 'right',
-            category: 'progress',
-          })
-        }
-        break
-
-      case 'sheet_complete':
-      case 'file_complete':
-        addLogForTask({
-          time: new Date().toLocaleTimeString('zh-CN'),
-          message: data.message || `处理完成: ${data.current_sheet || data.current_file || ''}`,
-          type: 'success',
-          align: 'left',
-        })
-        break
-
-      case 'completed':
-        if (taskId) {
-          // 任务完成时，确保所有阶段都标记为完成
-          updateTaskStage(taskId, 'preparing', 'completed')
-          updateTaskStage(taskId, 'ai_mapping', 'completed')
-          updateTaskStage(taskId, 'importing', 'completed')
-          updateTaskStage(taskId, 'done', 'completed')
-        }
-        updateProgress(data)
-        addLogForTask({
-          time: new Date().toLocaleTimeString('zh-CN'),
-          message: `任务完成: 成功 ${data.success_count}, 失败 ${data.error_count}`,
-          type: 'success',
-          align: 'left',
-        })
-        break
-
-      case 'error':
-        if (taskId) {
-          // 标记当前活动阶段为错误
-          const stages = taskStages.value.get(taskId)
-          if (stages) {
-            const activeStage = stages.find(s => s.status === 'active')
-            if (activeStage) activeStage.status = 'error'
-          }
-        }
-        addLogForTask({
-          time: new Date().toLocaleTimeString('zh-CN'),
-          message: `错误: ${data.message}`,
-          type: 'error',
-          align: 'left',
-        })
-        break
-
-      case 'warning':
-        addLogForTask({
-          time: new Date().toLocaleTimeString('zh-CN'),
-          message: `警告: ${data.message}`,
-          type: 'warning',
-          align: 'left',
-        })
-        break
-
-      default:
-        addLogForTask({
-          time: new Date().toLocaleTimeString('zh-CN'),
-          message: data.message || JSON.stringify(data),
-          type: 'info',
-          align: 'left',
-        })
-    }
-  }
-
-  function clearTasks() {
-    tasks.value = []
-    activeTask.value = null
-    progress.value = null
-  }
-
   function clearError() {
     error.value = null
   }
 
   return {
     // State
-    tasks,
-    activeTask,
-    progress,
+    taskMap,
+    taskIds,
+    selectedTaskId,
     loading,
     error,
-    pendingFiles,
-    logs,
-    selectedTaskId,
-    taskStages,
-    taskLogs,
-    selectedTaskIds,
-    collapsedGroups,
     // Getters
-    pendingTasks,
-    processingTasks,
+    tasks,
     activeTasks,
-    hasActiveTasks,
     completedTasks,
-    hasPendingFiles,
+    hasActiveTasks,
     selectedTask,
-    selectedStages,
-    selectedLogs,
     // Actions
+    selectTask,
     fetchTasks,
     startProcessing,
     pauseTask,
     resumeTask,
     cancelTask,
-    updateProgress,
-    clearTasks,
     clearError,
-    // 待处理文件
-    addPendingFile,
-    addPendingFiles,
-    removePendingFile,
-    clearPendingFiles,
-    // 日志
-    addLog,
-    addTaskLog,
-    clearLogs,
-    clearTaskLogs,
-    initTaskLogs,
-    // 阶段管理
-    initTaskStages,
-    updateTaskStage,
-    selectTask,
-    // 多选管理
-    toggleTaskSelection,
-    selectAllTasks,
-    deselectAllTasks,
-    isSelected,
-    // 分组折叠
-    toggleGroupCollapse,
-    isGroupCollapsed,
-    // 批量操作
-    batchPauseTasks,
-    batchResumeTasks,
-    batchCancelTasks,
-    // 状态同步
-    syncTaskStatus,
-    startStatusPolling,
-    stopStatusPolling,
-    // Tauri 事件监听
+    // 事件监听
     startEventListener,
     stopEventListener,
     handleProgressEvent,
+    // 状态轮询
+    startStatusPolling,
+    stopStatusPolling,
   }
 })
