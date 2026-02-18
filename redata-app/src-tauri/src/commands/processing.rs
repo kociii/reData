@@ -24,7 +24,7 @@ use crate::backend::infrastructure::{
     },
 };
 use field::Model as FieldModel;
-use super::ai_utils::{call_ai, extract_json};
+use super::ai_utils::{call_ai_stream, extract_json};
 use super::ai_service::FieldDefinition;
 
 // ============ 任务控制 ============
@@ -79,6 +79,7 @@ pub struct StartProcessingResponse {
     pub batch_number: String,
     pub project_id: i32,
     pub status: String,
+    pub source_files: Vec<String>,
 }
 
 // ============ 辅助函数 ============
@@ -256,6 +257,19 @@ pub async fn start_processing(
     let batch_number = format!("BATCH_{}_{:03}", date_str, count + 1);
 
     // 创建任务记录
+    // 提取源文件名列表
+    let source_file_names: Vec<String> = file_paths
+        .iter()
+        .map(|p| {
+            std::path::Path::new(p)
+                .file_name()
+                .map(|s| s.to_string_lossy().to_string())
+                .unwrap_or_else(|| "unknown".to_string())
+        })
+        .collect();
+    let source_files_json = serde_json::to_string(&source_file_names)
+        .unwrap_or_else(|_| "[]".to_string());
+
     let new_task = task::ActiveModel {
         id: Set(task_id.clone()),
         project_id: Set(project_id),
@@ -267,6 +281,7 @@ pub async fn start_processing(
         success_count: Set(0),
         error_count: Set(0),
         batch_number: Set(Some(batch_number.clone())),
+        source_files: Set(Some(source_files_json)),
         created_at: Set(now),
         updated_at: Set(None),
     };
@@ -338,6 +353,7 @@ pub async fn start_processing(
         batch_number,
         project_id,
         status: "processing".to_string(),
+        source_files: source_file_names,
     })
 }
 
@@ -575,8 +591,23 @@ async fn process_single_file(
             additional_requirement: f.additional_requirement.clone(),
         }).collect();
 
-        // AI 分析
-        let mapping_result = analyze_columns_with_ai(
+        // AI 分析（流式）
+        let app_clone = app.clone();
+        let task_id_clone = task_id.to_string();
+        let sheet_name_clone = sheet_name.clone();
+
+        // 构建请求提示（用于显示）
+        let request_preview = build_request_preview(&rows_data[0], &field_defs, rows_data.get(1..11).map(|r| r.to_vec()));
+        ProcessingEvent {
+            event: "ai_request".to_string(),
+            task_id: task_id.to_string(),
+            current_sheet: Some(sheet_name.clone()),
+            message: Some(request_preview),
+            ..Default::default()
+        }.emit(app);
+
+        let mapping_result = analyze_columns_with_ai_stream(
+            app_clone,
             api_url,
             api_key,
             model_name,
@@ -585,6 +616,8 @@ async fn process_single_file(
             &rows_data[0],
             &field_defs,
             rows_data.get(1..11).map(|r| r.to_vec()),
+            task_id_clone,
+            sheet_name_clone,
         ).await?;
 
         // 发送列映射结果
@@ -686,6 +719,7 @@ async fn process_single_file(
                     db,
                     task_id,
                     &data_json,
+                    Some(row),  // 传递原始行数据
                     Some(file_name.to_string()),
                     Some(sheet_name.clone()),
                     Some(row_idx as i32),
@@ -727,7 +761,46 @@ async fn process_single_file(
     Ok((total_rows, success_count, error_count))
 }
 
-async fn analyze_columns_with_ai(
+fn build_request_preview(
+    headers: &[String],
+    field_defs: &[FieldDefinition],
+    sample_rows: Option<Vec<Vec<String>>>,
+) -> String {
+    let mut preview = String::new();
+    preview.push_str("📤 发送给 AI 的数据:\n\n");
+    preview.push_str("📋 Excel 表头:\n");
+    for (i, header) in headers.iter().enumerate() {
+        preview.push_str(&format!("  [{}] {}\n", i, header));
+    }
+
+    preview.push_str("\n📝 目标字段:\n");
+    for field in field_defs {
+        let extra = field.additional_requirement
+            .as_ref()
+            .map(|r| format!(" ({})", r))
+            .unwrap_or_default();
+        preview.push_str(&format!(
+            "  • {} [{}]{}: {}\n",
+            field.field_name, field.field_type, extra, field.field_label
+        ));
+    }
+
+    if let Some(rows) = sample_rows {
+        preview.push_str("\n📊 样本数据:\n");
+        for (i, row) in rows.iter().enumerate().take(3) {
+            let preview_row: Vec<&str> = row.iter().take(5).map(|s| s.as_str()).collect();
+            preview.push_str(&format!("  行 {}: {}\n", i, preview_row.join(" | ")));
+            if row.len() > 5 {
+                preview.push_str(&format!("       ... (共 {} 列)\n", row.len()));
+            }
+        }
+    }
+
+    preview
+}
+
+async fn analyze_columns_with_ai_stream(
+    app: AppHandle,
     api_url: &str,
     api_key: &str,
     model_name: &str,
@@ -736,6 +809,8 @@ async fn analyze_columns_with_ai(
     headers: &[String],
     field_defs: &[FieldDefinition],
     sample_rows: Option<Vec<Vec<String>>>,
+    task_id: String,
+    sheet_name: String,
 ) -> Result<super::ai_service::ColumnMappingResponse, String> {
     let system_prompt = r#"你是一个数据处理专家，负责分析 Excel 表格的列与目标字段的映射关系。
 
@@ -787,7 +862,12 @@ async fn analyze_columns_with_ai(
 
     user_prompt.push_str("\n请分析列映射关系并返回 JSON 结果。");
 
-    let response = call_ai(
+    // 使用流式调用，每个 chunk 发送事件
+    let app_for_stream = app.clone();
+    let task_id_for_stream = task_id.clone();
+    let sheet_name_for_stream = sheet_name.clone();
+
+    let response = call_ai_stream(
         api_url,
         api_key,
         model_name,
@@ -796,6 +876,17 @@ async fn analyze_columns_with_ai(
         temperature,
         max_tokens,
         true,  // json_mode: 列映射需要返回 JSON
+        move |chunk: &str| {
+            // 发送流式事件
+            let event = ProcessingEvent {
+                event: "ai_response".to_string(),
+                task_id: task_id_for_stream.clone(),
+                current_sheet: Some(sheet_name_for_stream.clone()),
+                message: Some(chunk.to_string()),
+                ..Default::default()
+            };
+            event.emit(&app_for_stream);
+        },
     ).await?;
 
     // 解析响应
@@ -883,6 +974,7 @@ async fn insert_record(
     db: &Arc<DatabaseConnection>,
     task_id: &str,
     data: &serde_json::Value,
+    raw_data: Option<&[String]>,
     source_file: Option<String>,
     source_sheet: Option<String>,
     row_number: Option<i32>,
@@ -897,9 +989,15 @@ async fn insert_record(
     let data_str = serde_json::to_string(data)
         .map_err(|e| format!("JSON 序列化错误: {}", e))?;
 
+    // 序列化原始行数据
+    let raw_data_str = raw_data.map(|row| {
+        serde_json::to_string(row).unwrap_or_else(|_| "[]".to_string())
+    });
+
     let new_record = record::ActiveModel {
         project_id: Set(task.project_id),
         data: Set(data_str),
+        raw_data: Set(raw_data_str),
         source_file: Set(source_file),
         source_sheet: Set(source_sheet),
         row_number: Set(row_number),

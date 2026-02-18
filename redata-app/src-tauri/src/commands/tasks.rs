@@ -27,12 +27,18 @@ pub struct TaskResponse {
     pub success_count: i32,
     pub error_count: i32,
     pub batch_number: Option<String>,
+    pub source_files: Option<Vec<String>>,
     pub created_at: String,
     pub updated_at: Option<String>,
 }
 
 impl From<task::Model> for TaskResponse {
     fn from(m: task::Model) -> Self {
+        // 解析 source_files JSON 字符串为 Vec<String>
+        let source_files = m.source_files.and_then(|s| {
+            serde_json::from_str(&s).ok()
+        });
+
         Self {
             task_id: m.id.clone(),
             project_id: m.project_id,
@@ -44,6 +50,7 @@ impl From<task::Model> for TaskResponse {
             success_count: m.success_count,
             error_count: m.error_count,
             batch_number: m.batch_number,
+            source_files,
             created_at: m.created_at.to_rfc3339(),
             updated_at: m.updated_at.map(|t| t.to_rfc3339()),
         }
@@ -113,6 +120,7 @@ pub async fn create_processing_task(
         success_count: Set(0),
         error_count: Set(0),
         batch_number: Set(Some(batch_number)),
+        source_files: Set(None),
         created_at: Set(now),
         updated_at: Set(None),
     };

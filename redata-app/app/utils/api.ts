@@ -366,7 +366,7 @@ export const filesApi = {
 export const processingApi = {
   start: async (data: StartProcessingRequest) => {
     if (USE_TAURI_COMMANDS) {
-      return await invoke<{ task_id: string; batch_number: string; project_id: number; status: string }>('start_processing', {
+      return await invoke<{ task_id: string; batch_number: string; project_id: number; status: string; source_files: string[] }>('start_processing', {
         projectId: data.project_id,
         filePaths: data.file_paths,
         aiConfigId: data.ai_config_id,
@@ -652,5 +652,24 @@ export const aiServiceApi = {
         additional_requirement: additionalRequirement,
       }),
     })
+  },
+}
+
+// ============ 统计 API ============
+
+export interface ProjectStatistics {
+  total_records: number
+  today_records: number
+  week_records: number
+  month_records: number
+  total_tasks: number
+  success_tasks: number
+  success_rate: number
+  last_processed_at: string | null
+}
+
+export const statisticsApi = {
+  get: async (projectId: number): Promise<ProjectStatistics> => {
+    return await invoke<ProjectStatistics>('get_project_statistics', { projectId })
   },
 }

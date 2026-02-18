@@ -1,5 +1,5 @@
 <template>
-  <div class="py-4 flex flex-col h-full">
+  <div class="flex flex-col">
     <!-- 工具栏 -->
     <div class="flex justify-between items-center mb-4">
       <div class="text-sm text-muted">
@@ -44,7 +44,7 @@
     </div>
 
     <!-- 主内容区：左右分栏 -->
-    <div v-else class="flex gap-4 flex-1 min-h-0">
+    <div v-else class="flex gap-4" style="height: calc(100vh - 280px);">
       <!-- 左侧面板：三状态分组 -->
       <div class="w-72 flex-shrink-0 flex flex-col gap-3 overflow-y-auto">
         <!-- 待处理文件分组 -->
@@ -190,42 +190,25 @@
       <!-- 右侧面板：对话式展示 -->
       <div class="flex-1 flex flex-col gap-4 min-w-0 overflow-y-auto">
         <template v-if="store.selectedTask">
-          <!-- 状态卡片流 -->
-          <div class="flex gap-2 flex-wrap">
-            <div
-              v-for="stage in store.selectedStages" :key="stage.key"
-              class="flex items-center gap-2 px-3 py-2 rounded-lg border transition-all"
-              :class="getStageCardClass(stage.status)"
-            >
-              <UIcon
-                :name="getStageIcon(stage.status)"
-                :class="[
-                  'w-4 h-4',
-                  stage.status === 'active' ? 'animate-pulse' : ''
-                ]"
-              />
-              <span class="text-sm font-medium">{{ stage.label }}</span>
-              <UIcon v-if="stage.status === 'active'" name="i-lucide-loader" class="w-3 h-3 animate-spin" />
-            </div>
-          </div>
+          <!-- 步骤条 -->
+          <UStepper
+            :items="stepperItems"
+            :default-value="currentStepIndex"
+            disabled
+            size="sm"
+            class="w-full"
+          />
 
-          <!-- 统计卡片 -->
-          <div class="grid grid-cols-4 gap-3">
-            <div class="bg-elevated rounded-lg border border-default p-3 text-center">
-              <div class="text-2xl font-bold text-highlighted">{{ store.selectedTask.total_files }}</div>
-              <div class="text-xs text-muted mt-1">文件数</div>
+          <!-- 统计数据：左右分布 -->
+          <div class="flex justify-between items-center px-4 py-3 bg-elevated rounded-lg border border-default">
+            <div class="text-center">
+              <div class="text-2xl font-bold text-highlighted">{{ store.selectedTask.total_rows || 0 }}</div>
+              <div class="text-xs text-muted mt-1">原始数据</div>
             </div>
-            <div class="bg-elevated rounded-lg border border-default p-3 text-center">
+            <div class="h-8 w-px bg-default" />
+            <div class="text-center">
               <div class="text-2xl font-bold text-success">{{ store.selectedTask.success_count }}</div>
-              <div class="text-xs text-muted mt-1">成功</div>
-            </div>
-            <div class="bg-elevated rounded-lg border border-default p-3 text-center">
-              <div class="text-2xl font-bold text-error">{{ store.selectedTask.error_count }}</div>
-              <div class="text-xs text-muted mt-1">失败</div>
-            </div>
-            <div class="bg-elevated rounded-lg border border-default p-3 text-center">
-              <div class="text-2xl font-bold text-highlighted text-sm">{{ store.selectedTask.batch_number || '-' }}</div>
-              <div class="text-xs text-muted mt-1">批次</div>
+              <div class="text-xs text-muted mt-1">导入成功</div>
             </div>
           </div>
 
@@ -256,18 +239,42 @@
             </UButton>
           </div>
 
-          <!-- 操作按钮（已完成时） -->
-          <div v-if="store.selectedTask.status === 'completed'" class="flex gap-2">
+          <!-- 视图切换按钮 -->
+          <div class="flex gap-1 p-1 bg-muted rounded-lg">
             <UButton
-              icon="i-lucide-table" color="primary" variant="soft"
-              @click="viewResults(store.selectedTask)"
+              variant="ghost"
+              size="xs"
+              :color="detailViewMode === 'logs' ? 'primary' : 'neutral'"
+              :class="detailViewMode === 'logs' ? 'bg-elevated' : ''"
+              icon="i-lucide-scroll-text"
+              @click="switchViewMode('logs')"
             >
-              查看结果
+              处理过程
+            </UButton>
+            <UButton
+              variant="ghost"
+              size="xs"
+              :color="detailViewMode === 'raw' ? 'primary' : 'neutral'"
+              :class="detailViewMode === 'raw' ? 'bg-elevated' : ''"
+              icon="i-lucide-file-spreadsheet"
+              @click="switchViewMode('raw')"
+            >
+              原始数据
+            </UButton>
+            <UButton
+              variant="ghost"
+              size="xs"
+              :color="detailViewMode === 'results' ? 'primary' : 'neutral'"
+              :class="detailViewMode === 'results' ? 'bg-elevated' : ''"
+              icon="i-lucide-table-2"
+              @click="switchViewMode('results')"
+            >
+              处理结果
             </UButton>
           </div>
 
-          <!-- 对话式日志流 -->
-          <div class="flex-1 min-h-0 flex flex-col">
+          <!-- 处理过程（日志）视图 -->
+          <div v-if="detailViewMode === 'logs'" class="flex-1 min-h-0 flex flex-col">
             <div class="flex justify-between items-center mb-2">
               <h3 class="text-xs font-medium text-muted uppercase tracking-wider">处理日志</h3>
               <UButton
@@ -306,6 +313,114 @@
               </div>
             </div>
           </div>
+
+          <!-- 原始数据视图 -->
+          <div v-else-if="detailViewMode === 'raw'" class="flex-1 min-h-0 flex flex-col">
+            <div v-if="rawDataLoading" class="flex-1 flex items-center justify-center">
+              <UIcon name="i-lucide-loader" class="w-6 h-6 animate-spin text-primary" />
+            </div>
+            <div v-else-if="!rawData" class="flex-1 flex flex-col items-center justify-center text-dimmed gap-3">
+              <UIcon name="i-lucide-file-spreadsheet" class="w-10 h-10" />
+              <p class="text-sm">点击选择文件查看原始数据</p>
+              <UButton size="sm" icon="i-lucide-folder-open" @click="loadRawData">
+                选择文件
+              </UButton>
+            </div>
+            <template v-else>
+              <!-- Sheet 选择器 -->
+              <div v-if="rawSheets.length > 1" class="flex gap-1 mb-2 flex-wrap">
+                <UButton
+                  v-for="sheet in rawSheets"
+                  :key="sheet.name"
+                  :variant="currentSheet === sheet.name ? 'soft' : 'ghost'"
+                  :color="currentSheet === sheet.name ? 'primary' : 'neutral'"
+                  size="xs"
+                  @click="switchSheet(sheet.name)"
+                >
+                  {{ sheet.name }}
+                  <UBadge variant="subtle" size="xs" class="ml-1">{{ sheet.row_count }}</UBadge>
+                </UButton>
+              </div>
+              <!-- 数据表格 -->
+              <div class="flex-1 overflow-auto bg-muted rounded-lg">
+                <table class="w-full text-xs border-collapse">
+                  <thead class="sticky top-0 bg-elevated">
+                    <tr>
+                      <th class="border-b border-default px-2 py-1 text-left text-muted font-medium w-8">#</th>
+                      <th
+                        v-for="(_, colIndex) in (rawData.rows[0] || [])"
+                        :key="colIndex"
+                        class="border-b border-default px-2 py-1 text-left text-muted font-medium"
+                      >
+                        {{ String.fromCharCode(65 + colIndex) }}
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr v-for="(row, rowIndex) in rawData.rows" :key="rowIndex" class="hover:bg-elevated/50">
+                      <td class="border-b border-default px-2 py-1 text-muted">{{ rowIndex + 1 }}</td>
+                      <td
+                        v-for="(cell, colIndex) in row"
+                        :key="colIndex"
+                        class="border-b border-default px-2 py-1 truncate max-w-[120px]"
+                        :title="String(cell)"
+                      >
+                        {{ cell ?? '' }}
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </template>
+          </div>
+
+          <!-- 处理结果视图 -->
+          <div v-else-if="detailViewMode === 'results'" class="flex-1 min-h-0 flex flex-col">
+            <div v-if="resultsLoading" class="flex-1 flex items-center justify-center">
+              <UIcon name="i-lucide-loader" class="w-6 h-6 animate-spin text-primary" />
+            </div>
+            <div v-else-if="resultsData.length === 0" class="flex-1 flex flex-col items-center justify-center text-dimmed gap-2">
+              <UIcon name="i-lucide-inbox" class="w-10 h-10" />
+              <p class="text-sm">暂无处理结果</p>
+              <p class="text-xs text-muted">任务完成后会显示在这里</p>
+            </div>
+            <template v-else>
+              <div class="flex justify-between items-center mb-2">
+                <span class="text-xs text-muted">共 {{ resultsTotal }} 条记录</span>
+              </div>
+              <!-- 结果表格 -->
+              <div class="flex-1 overflow-auto bg-muted rounded-lg">
+                <table class="w-full text-xs border-collapse">
+                  <thead class="sticky top-0 bg-elevated">
+                    <tr>
+                      <th class="border-b border-default px-2 py-1 text-left text-muted font-medium w-8">#</th>
+                      <th class="border-b border-default px-2 py-1 text-left text-muted font-medium">来源</th>
+                      <th class="border-b border-default px-2 py-1 text-left text-muted font-medium">数据</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr v-for="(record, index) in resultsData" :key="record.id" class="hover:bg-elevated/50">
+                      <td class="border-b border-default px-2 py-1 text-muted">{{ index + 1 }}</td>
+                      <td class="border-b border-default px-2 py-1 text-muted whitespace-nowrap">
+                        <div>{{ record.source_file }}</div>
+                        <div v-if="record.source_sheet" class="text-dimmed">Sheet: {{ record.source_sheet }}</div>
+                      </td>
+                      <td class="border-b border-default px-2 py-1">
+                        <div class="flex flex-wrap gap-1">
+                          <template v-for="(value, key) in record.data" :key="key">
+                            <span v-if="value" class="inline-flex items-center gap-1 bg-elevated px-1.5 py-0.5 rounded text-default">
+                              <span class="text-muted">{{ key }}:</span>
+                              <span class="truncate max-w-[100px]" :title="String(value)">{{ value }}</span>
+                            </span>
+                          </template>
+                        </div>
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </template>
+          </div>
         </template>
 
         <!-- 未选中任务时的提示 -->
@@ -325,7 +440,8 @@ import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { open } from '@tauri-apps/plugin-dialog'
 import { useProcessingStore } from '~/stores/processing'
-import type { PendingFile } from '~/types'
+import { filesApi, recordsApi } from '~/utils/api'
+import type { PendingFile, ExcelPreview, ProjectRecord, ProjectField } from '~/types'
 
 const route = useRoute()
 const router = useRouter()
@@ -337,6 +453,45 @@ const projectId = computed(() => Number(route.params.id))
 const selectingFiles = ref(false)
 const startingAll = ref(false)
 const logContainer = ref<HTMLElement | null>(null)
+
+// 右侧详情视图模式
+const detailViewMode = ref<'logs' | 'raw' | 'results'>('logs')
+
+// 原始数据状态
+const rawDataLoading = ref(false)
+const rawData = ref<ExcelPreview | null>(null)
+const rawSheets = ref<{ name: string; row_count: number; column_count: number }[]>([])
+const currentSheet = ref<string>('')
+
+// 处理结果状态
+const resultsLoading = ref(false)
+const resultsData = ref<ProjectRecord[]>([])
+const resultsTotal = ref(0)
+
+// 项目字段（用于显示结果）
+const projectFields = ref<ProjectField[]>([])
+
+// 步骤条配置
+const stepperItems = computed(() => {
+  const stages = store.selectedStages
+  return stages.map((stage, index) => ({
+    title: stage.label,
+    icon: stage.status === 'completed' ? 'i-lucide-check' :
+          stage.status === 'active' ? 'i-lucide-loader' :
+          stage.status === 'error' ? 'i-lucide-x' : 'i-lucide-circle',
+    value: index,
+  }))
+})
+
+// 当前步骤索引
+const currentStepIndex = computed(() => {
+  const stages = store.selectedStages
+  const activeIndex = stages.findIndex(s => s.status === 'active')
+  if (activeIndex >= 0) return activeIndex
+  const completedCount = stages.filter(s => s.status === 'completed').length
+  if (completedCount === stages.length) return stages.length - 1
+  return 0
+})
 
 // 多选：已选中的处理中任务 ID
 const selectedProcessingIds = computed(() => {
@@ -483,11 +638,106 @@ async function cancelTask(taskId: string) {
   }
 }
 
-function viewResults(task: { batch_number: string | null }) {
-  if (task.batch_number) {
-    router.push(`/project/${projectId.value}/results?batch=${task.batch_number}`)
-  } else {
-    router.push(`/project/${projectId.value}/results`)
+// 切换视图模式
+function switchViewMode(mode: 'logs' | 'raw' | 'results') {
+  detailViewMode.value = mode
+  if (mode === 'raw' && store.selectedTask) {
+    loadRawData()
+  } else if (mode === 'results' && store.selectedTask) {
+    loadTaskResults(store.selectedTask.batch_number)
+  }
+}
+
+// 加载原始数据
+async function loadRawData() {
+  if (!store.selectedTask?.source_files?.length) {
+    toast.add({ title: '没有源文件信息', color: 'warning' })
+    return
+  }
+
+  rawDataLoading.value = true
+  rawData.value = null
+  rawSheets.value = []
+
+  try {
+    // 获取第一个源文件的路径（需要从文件名反推或存储完整路径）
+    // 这里暂时用 toast 提示，实际需要存储完整文件路径
+    // 由于当前只存储了文件名，这里先显示提示
+    toast.add({ title: '提示：原始数据预览需要重新选择文件', color: 'info' })
+
+    // 让用户重新选择文件
+    const selected = await open({
+      multiple: false,
+      filters: [{ name: 'Excel Files', extensions: ['xlsx', 'xls', 'csv'] }],
+    })
+
+    if (!selected) {
+      rawDataLoading.value = false
+      return
+    }
+
+    const filePath = selected as string
+
+    // 获取 sheet 列表
+    const preview = await filesApi.preview(filePath, undefined, 100)
+    rawSheets.value = preview.sheets
+    currentSheet.value = preview.sheet_name
+    rawData.value = preview
+  } catch (error: any) {
+    toast.add({ title: '加载原始数据失败', description: error?.message, color: 'error' })
+  } finally {
+    rawDataLoading.value = false
+  }
+}
+
+// 切换 Sheet
+async function switchSheet(sheetName: string) {
+  if (!store.selectedTask?.source_files?.length || rawDataLoading.value) return
+
+  rawDataLoading.value = true
+  try {
+    const selected = await open({
+      multiple: false,
+      filters: [{ name: 'Excel Files', extensions: ['xlsx', 'xls', 'csv'] }],
+    })
+
+    if (!selected) {
+      rawDataLoading.value = false
+      return
+    }
+
+    const preview = await filesApi.preview(selected as string, sheetName, 100)
+    rawData.value = preview
+    currentSheet.value = sheetName
+  } catch (error: any) {
+    toast.add({ title: '切换 Sheet 失败', description: error?.message, color: 'error' })
+  } finally {
+    rawDataLoading.value = false
+  }
+}
+
+// 加载任务处理结果
+async function loadTaskResults(batchNumber: string | null) {
+  if (!batchNumber) {
+    toast.add({ title: '没有批次信息', color: 'warning' })
+    return
+  }
+
+  resultsLoading.value = true
+  resultsData.value = []
+
+  try {
+    const response = await recordsApi.query(projectId.value, {
+      batch_number: batchNumber,
+      page: 1,
+      page_size: 100,
+    })
+    resultsData.value = response.records
+    resultsTotal.value = response.total
+  } catch (error: any) {
+    toast.add({ title: '加载处理结果失败', description: error?.message, color: 'error' })
+  } finally {
+    resultsLoading.value = false
   }
 }
 
@@ -555,27 +805,6 @@ function getTaskTitle(task: { source_files?: string[]; total_files: number; id: 
 // 获取任务副标题（显示批次号）
 function getTaskSubtitle(task: { batch_number?: string | null; id: string }): string {
   return task.batch_number || `ID: ${task.id.slice(0, 8)}`
-}
-
-// 阶段卡片样式
-function getStageCardClass(status: string): string {
-  const classes: Record<string, string> = {
-    pending: 'bg-muted border-default text-muted',
-    active: 'bg-info/10 border-info text-info',
-    completed: 'bg-success/10 border-success text-success',
-    error: 'bg-error/10 border-error text-error',
-  }
-  return classes[status] || classes.pending
-}
-
-function getStageIcon(status: string): string {
-  const icons: Record<string, string> = {
-    pending: 'i-lucide-circle',
-    active: 'i-lucide-circle-dot',
-    completed: 'i-lucide-circle-check',
-    error: 'i-lucide-circle-x',
-  }
-  return icons[status] || 'i-lucide-circle'
 }
 
 // 日志气泡样式

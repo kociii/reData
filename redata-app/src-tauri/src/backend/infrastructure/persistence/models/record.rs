@@ -17,6 +17,10 @@ pub struct Model {
     #[sea_orm(column_type = "Text")]
     pub data: String,
 
+    /// 原始行数据，JSON 数组格式，存储该行的所有列值
+    #[sea_orm(column_type = "Text", nullable)]
+    pub raw_data: Option<String>,
+
     pub source_file: Option<String>,
     pub source_sheet: Option<String>,
     pub row_number: Option<i32>,

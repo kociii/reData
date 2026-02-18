@@ -36,6 +36,10 @@ pub struct Model {
 
     pub batch_number: Option<String>,
 
+    /// 源文件列表，JSON 数组格式
+    #[sea_orm(column_type = "Text", nullable)]
+    pub source_files: Option<String>,
+
     pub created_at: DateTimeUtc,
 
     pub updated_at: Option<DateTimeUtc>,

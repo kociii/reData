@@ -127,6 +127,7 @@ export interface ProcessingTask {
   success_count: number
   error_count: number
   batch_number: string | null
+  source_files?: string[]  // 源文件名列表
   message?: string
   // UI 扩展字段
   file_name?: string
@@ -150,6 +151,8 @@ export interface LogEntry {
   time: string
   message: string
   type: 'info' | 'success' | 'warning' | 'error'
+  align?: 'left' | 'right'  // 对话式布局：左对齐（系统消息）或右对齐（进度消息）
+  category?: 'ai' | 'ai_request' | 'progress' | 'system'  // 日志类别
 }
 
 export interface StartProcessingRequest {

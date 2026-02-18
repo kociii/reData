@@ -12,6 +12,7 @@ pub mod records;
 pub mod excel;
 pub mod tasks;
 pub mod processing;
+pub mod statistics;
 
 // 重新导出所有 commands，方便在 lib.rs 中注册
 pub use projects::*;
@@ -22,3 +23,4 @@ pub use records::*;
 pub use excel::*;
 pub use tasks::*;
 pub use processing::*;
+pub use statistics::*;

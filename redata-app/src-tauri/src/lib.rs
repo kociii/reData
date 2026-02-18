@@ -155,6 +155,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_store::Builder::default().build())
         .manage(db)
         .invoke_handler(tauri::generate_handler![
             greet,
@@ -209,6 +210,8 @@ pub fn run() {
             commands::pause_processing_task,
             commands::resume_processing_task,
             commands::cancel_processing_task,
+            // 统计 Commands
+            commands::get_project_statistics,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

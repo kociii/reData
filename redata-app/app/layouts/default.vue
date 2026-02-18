@@ -42,7 +42,7 @@
           <span class="truncate max-w-32">{{ tab.label }}</span>
           <button
             v-if="tab.closable"
-            class="ml-1 p-0.5 rounded hover:bg-accented opacity-0 group-hover:opacity-100 transition-opacity"
+            class="ml-1 p-0.5 rounded hover:bg-accented transition-colors"
             @click.stop="closeTab(tab.id)"
           >
             <UIcon name="i-lucide-x" class="w-3 h-3" />
@@ -129,7 +129,10 @@ const route = useRoute()
 
 // 计算属性
 const isProjectPage = computed(() => route.path.startsWith('/project/'))
-const projectId = computed(() => route.params.id as string | undefined)
+const projectId = computed(() => {
+  const id = route.params.id
+  return Array.isArray(id) ? id[0] : id
+})
 
 // 项目子导航 Tab 判断
 const isSettingsTab = computed(() => route.path.includes('/settings') && isProjectPage.value)

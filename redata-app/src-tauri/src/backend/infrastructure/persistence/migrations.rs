@@ -24,6 +24,12 @@ pub async fn run_migrations(db: &DatabaseConnection) -> Result<(), DbErr> {
     // 创建 project_records 表（JSON 统一存储）
     create_project_records_table(db).await?;
 
+    // v0.1.1 迁移：添加 raw_data 列
+    add_raw_data_column(db).await?;
+
+    // v0.1.1 迁移：添加 source_files 列到任务表
+    add_source_files_column(db).await?;
+
     tracing::info!("Database migrations completed");
 
     Ok(())
@@ -229,5 +235,49 @@ async fn create_project_records_table(db: &DatabaseConnection) -> Result<(), DbE
     .await?;
 
     tracing::debug!("Created project_records table");
+    Ok(())
+}
+
+/// v0.1.1 迁移：添加 raw_data 列（原始行数据）
+async fn add_raw_data_column(db: &DatabaseConnection) -> Result<(), DbErr> {
+    // 检查列是否已存在
+    let result = db
+        .query_one(Statement::from_string(
+            db.get_database_backend(),
+            "SELECT name FROM pragma_table_info('project_records') WHERE name = 'raw_data'".to_string(),
+        ))
+        .await?;
+
+    if result.is_none() {
+        db.execute(Statement::from_string(
+            db.get_database_backend(),
+            "ALTER TABLE project_records ADD COLUMN raw_data TEXT".to_string(),
+        ))
+        .await?;
+        tracing::info!("Added raw_data column to project_records table");
+    }
+
+    Ok(())
+}
+
+/// v0.1.1 迁移：添加 source_files 列到任务表
+async fn add_source_files_column(db: &DatabaseConnection) -> Result<(), DbErr> {
+    // 检查列是否已存在
+    let result = db
+        .query_one(Statement::from_string(
+            db.get_database_backend(),
+            "SELECT name FROM pragma_table_info('processing_tasks') WHERE name = 'source_files'".to_string(),
+        ))
+        .await?;
+
+    if result.is_none() {
+        db.execute(Statement::from_string(
+            db.get_database_backend(),
+            "ALTER TABLE processing_tasks ADD COLUMN source_files TEXT".to_string(),
+        ))
+        .await?;
+        tracing::info!("Added source_files column to processing_tasks table");
+    }
+
     Ok(())
 }

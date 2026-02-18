@@ -27,20 +27,41 @@ export const useProcessingStore = defineStore('processing', () => {
   // 新增：每个任务的处理阶段 Map<taskId, ProcessingStage[]>
   const taskStages = ref<Map<string, ProcessingStage[]>>(new Map())
 
+  // 新增：每个任务的独立日志 Map<taskId, LogEntry[]>（状态隔离）
+  const taskLogs = ref<Map<string, LogEntry[]>>(new Map())
+
+  // 新增：多选的任务 ID
+  const selectedTaskIds = ref<Set<string>>(new Set())
+
+  // 新增：分组折叠状态
+  const collapsedGroups = ref<Set<string>>(new Set())
+
   // Getters
-  const activeTasks = computed(() =>
-    tasks.value.filter(t => t.status === 'processing' || t.status === 'paused')
+  // 待处理任务（pending 状态）
+  const pendingTasks = computed(() =>
+    tasks.value.filter(t => t.status === 'pending')
   )
-  const hasActiveTasks = computed(() => activeTasks.value.length > 0)
+  // 处理中任务（processing, paused, queued）
+  const processingTasks = computed(() =>
+    tasks.value.filter(t => t.status === 'processing' || t.status === 'paused' || t.status === 'queued')
+  )
+  // 已完成任务（completed, cancelled）
   const completedTasks = computed(() =>
-    tasks.value.filter(t => t.status === 'completed')
+    tasks.value.filter(t => t.status === 'completed' || t.status === 'cancelled')
   )
+  // 兼容旧代码
+  const activeTasks = computed(() => processingTasks.value)
+  const hasActiveTasks = computed(() => processingTasks.value.length > 0)
   const hasPendingFiles = computed(() => pendingFiles.value.length > 0)
   const selectedTask = computed(() =>
     selectedTaskId.value ? tasks.value.find(t => t.id === selectedTaskId.value) : null
   )
   const selectedStages = computed(() =>
     selectedTaskId.value ? taskStages.value.get(selectedTaskId.value) || createDefaultStages() : createDefaultStages()
+  )
+  // 选中任务的独立日志
+  const selectedLogs = computed(() =>
+    selectedTaskId.value ? taskLogs.value.get(selectedTaskId.value) || [] : []
   )
 
   // Actions
@@ -66,6 +87,23 @@ export const useProcessingStore = defineStore('processing', () => {
         ...task,
         id: task.task_id,
       }))
+
+      // 为已完成/已取消的任务初始化阶段状态
+      tasks.value.forEach(task => {
+        if (!taskStages.value.has(task.id)) {
+          if (task.status === 'completed' || task.status === 'cancelled') {
+            // 所有阶段都标记为完成
+            const completedStages = createDefaultStages().map(s => ({
+              ...s,
+              status: 'completed' as const
+            }))
+            taskStages.value.set(task.id, completedStages)
+          } else if (task.status === 'error') {
+            // 错误状态保持默认
+            initTaskStages(task.id)
+          }
+        }
+      })
     } catch (e: any) {
       error.value = e.message
       console.error('Failed to fetch tasks:', e)
@@ -82,6 +120,11 @@ export const useProcessingStore = defineStore('processing', () => {
         project_id: projectId,
         file_paths: filePaths,
       })
+      // 提取源文件名
+      const sourceFileNames = filePaths.map(p => {
+        const parts = p.split(/[/\\]/)
+        return parts[parts.length - 1] || p
+      })
       // 添加 id 字段
       const taskWithId: ProcessingTask = {
         id: task.task_id,
@@ -95,6 +138,7 @@ export const useProcessingStore = defineStore('processing', () => {
         success_count: 0,
         error_count: 0,
         batch_number: task.batch_number,
+        source_files: task.source_files || sourceFileNames,
       }
       tasks.value.unshift(taskWithId)
       activeTask.value = taskWithId
@@ -225,6 +269,7 @@ export const useProcessingStore = defineStore('processing', () => {
   }
 
   // 日志管理
+  // 添加日志到全局日志（兼容旧代码）
   function addLog(log: LogEntry) {
     logs.value.push(log)
     // 保持最近 200 条日志
@@ -233,8 +278,34 @@ export const useProcessingStore = defineStore('processing', () => {
     }
   }
 
+  // 添加日志到指定任务（状态隔离）
+  function addTaskLog(taskId: string, log: LogEntry) {
+    // 同时更新全局日志（兼容）
+    addLog(log)
+
+    // 更新任务独立日志
+    const taskLogList = taskLogs.value.get(taskId) || []
+    taskLogList.push(log)
+    // 每个任务保持最近 500 条日志
+    if (taskLogList.length > 500) {
+      taskLogList.shift()
+    }
+    taskLogs.value.set(taskId, [...taskLogList])
+  }
+
   function clearLogs() {
     logs.value = []
+  }
+
+  function clearTaskLogs(taskId: string) {
+    taskLogs.value.set(taskId, [])
+  }
+
+  // 初始化任务日志
+  function initTaskLogs(taskId: string) {
+    if (!taskLogs.value.has(taskId)) {
+      taskLogs.value.set(taskId, [])
+    }
   }
 
   // 阶段管理
@@ -249,6 +320,7 @@ export const useProcessingStore = defineStore('processing', () => {
 
   function initTaskStages(taskId: string) {
     taskStages.value.set(taskId, createDefaultStages())
+    initTaskLogs(taskId)
   }
 
   function updateTaskStage(taskId: string, stageKey: string, status: ProcessingStage['status']) {
@@ -265,6 +337,75 @@ export const useProcessingStore = defineStore('processing', () => {
 
   function selectTask(taskId: string | null) {
     selectedTaskId.value = taskId
+  }
+
+  // 多选管理
+  function toggleTaskSelection(taskId: string) {
+    if (selectedTaskIds.value.has(taskId)) {
+      selectedTaskIds.value.delete(taskId)
+    } else {
+      selectedTaskIds.value.add(taskId)
+    }
+    // 触发响应式更新
+    selectedTaskIds.value = new Set(selectedTaskIds.value)
+  }
+
+  function selectAllTasks(taskIds: string[]) {
+    taskIds.forEach(id => selectedTaskIds.value.add(id))
+    selectedTaskIds.value = new Set(selectedTaskIds.value)
+  }
+
+  function deselectAllTasks() {
+    selectedTaskIds.value = new Set()
+  }
+
+  function isSelected(taskId: string): boolean {
+    return selectedTaskIds.value.has(taskId)
+  }
+
+  // 分组折叠管理
+  function toggleGroupCollapse(group: string) {
+    if (collapsedGroups.value.has(group)) {
+      collapsedGroups.value.delete(group)
+    } else {
+      collapsedGroups.value.add(group)
+    }
+    collapsedGroups.value = new Set(collapsedGroups.value)
+  }
+
+  function isGroupCollapsed(group: string): boolean {
+    return collapsedGroups.value.has(group)
+  }
+
+  // 批量操作
+  async function batchPauseTasks(taskIds: string[]) {
+    for (const taskId of taskIds) {
+      try {
+        await pauseTask(taskId)
+      } catch (e) {
+        console.error('Failed to pause task:', taskId, e)
+      }
+    }
+  }
+
+  async function batchResumeTasks(taskIds: string[]) {
+    for (const taskId of taskIds) {
+      try {
+        await resumeTask(taskId)
+      } catch (e) {
+        console.error('Failed to resume task:', taskId, e)
+      }
+    }
+  }
+
+  async function batchCancelTasks(taskIds: string[]) {
+    for (const taskId of taskIds) {
+      try {
+        await cancelTask(taskId)
+      } catch (e) {
+        console.error('Failed to cancel task:', taskId, e)
+      }
+    }
   }
 
   // 从 API 同步任务状态（兜底机制，防止 WebSocket 丢失事件）
@@ -353,6 +494,15 @@ export const useProcessingStore = defineStore('processing', () => {
       initTaskStages(taskId)
     }
 
+    // 辅助函数：添加日志到指定任务
+    const addLogForTask = (log: LogEntry) => {
+      if (taskId) {
+        addTaskLog(taskId, log)
+      } else {
+        addLog(log)
+      }
+    }
+
     switch (data.event) {
       case 'file_start':
       case 'sheet_start':
@@ -360,10 +510,11 @@ export const useProcessingStore = defineStore('processing', () => {
           updateTaskStage(taskId, 'preparing', 'completed')
           updateTaskStage(taskId, 'ai_mapping', 'active')
         }
-        addLog({
+        addLogForTask({
           time: new Date().toLocaleTimeString('zh-CN'),
           message: data.message || `开始处理: ${data.current_sheet || data.current_file || ''}`,
           type: 'info',
+          align: 'left',
         })
         break
 
@@ -372,39 +523,84 @@ export const useProcessingStore = defineStore('processing', () => {
           updateTaskStage(taskId, 'ai_mapping', 'completed')
           updateTaskStage(taskId, 'importing', 'active')
         }
-        addLog({
+        addLogForTask({
           time: new Date().toLocaleTimeString('zh-CN'),
           message: `AI 列映射完成 (置信度: ${((data.confidence || 0) * 100).toFixed(0)}%)`,
           type: 'success',
+          align: 'left',
         })
         break
 
       case 'ai_analyzing':
-        addLog({
+        addLogForTask({
           time: new Date().toLocaleTimeString('zh-CN'),
           message: data.message || 'AI 分析中...',
           type: 'info',
+          align: 'left',
+          category: 'ai',
         })
+        break
+
+      case 'ai_request':
+        // 显示发送给 AI 的请求内容
+        if (data.message) {
+          addLogForTask({
+            time: new Date().toLocaleTimeString('zh-CN'),
+            message: data.message,
+            type: 'info',
+            align: 'left',
+            category: 'ai_request',
+          })
+        }
+        break
+
+      case 'ai_response':
+        // AI 流式响应（追加到上一条 AI 日志）
+        if (taskId && data.message) {
+          const taskLogList = taskLogs.value.get(taskId) || []
+          // 查找最后一条 AI 类型的日志
+          const lastAiLogIndex = taskLogList.findLastIndex(l => l.category === 'ai')
+          if (lastAiLogIndex >= 0) {
+            // 追加到最后一条日志
+            taskLogList[lastAiLogIndex] = {
+              ...taskLogList[lastAiLogIndex],
+              message: taskLogList[lastAiLogIndex].message + data.message,
+            }
+            taskLogs.value.set(taskId, [...taskLogList])
+          } else {
+            // 没有找到 AI 日志，创建新的
+            addLogForTask({
+              time: new Date().toLocaleTimeString('zh-CN'),
+              message: data.message,
+              type: 'info',
+              align: 'left',
+              category: 'ai',
+            })
+          }
+        }
         break
 
       case 'row_processed':
         updateProgress(data)
         // 每 50 行记录一次日志，避免刷屏
         if (data.processed_rows && data.processed_rows % 50 === 0) {
-          addLog({
+          addLogForTask({
             time: new Date().toLocaleTimeString('zh-CN'),
             message: `导入进度: ${data.processed_rows}/${data.total_rows}`,
             type: 'info',
+            align: 'right',
+            category: 'progress',
           })
         }
         break
 
       case 'sheet_complete':
       case 'file_complete':
-        addLog({
+        addLogForTask({
           time: new Date().toLocaleTimeString('zh-CN'),
           message: data.message || `处理完成: ${data.current_sheet || data.current_file || ''}`,
           type: 'success',
+          align: 'left',
         })
         break
 
@@ -417,10 +613,11 @@ export const useProcessingStore = defineStore('processing', () => {
           updateTaskStage(taskId, 'done', 'completed')
         }
         updateProgress(data)
-        addLog({
+        addLogForTask({
           time: new Date().toLocaleTimeString('zh-CN'),
           message: `任务完成: 成功 ${data.success_count}, 失败 ${data.error_count}`,
           type: 'success',
+          align: 'left',
         })
         break
 
@@ -433,26 +630,29 @@ export const useProcessingStore = defineStore('processing', () => {
             if (activeStage) activeStage.status = 'error'
           }
         }
-        addLog({
+        addLogForTask({
           time: new Date().toLocaleTimeString('zh-CN'),
           message: `错误: ${data.message}`,
           type: 'error',
+          align: 'left',
         })
         break
 
       case 'warning':
-        addLog({
+        addLogForTask({
           time: new Date().toLocaleTimeString('zh-CN'),
           message: `警告: ${data.message}`,
           type: 'warning',
+          align: 'left',
         })
         break
 
       default:
-        addLog({
+        addLogForTask({
           time: new Date().toLocaleTimeString('zh-CN'),
           message: data.message || JSON.stringify(data),
           type: 'info',
+          align: 'left',
         })
     }
   }
@@ -478,13 +678,19 @@ export const useProcessingStore = defineStore('processing', () => {
     logs,
     selectedTaskId,
     taskStages,
+    taskLogs,
+    selectedTaskIds,
+    collapsedGroups,
     // Getters
+    pendingTasks,
+    processingTasks,
     activeTasks,
     hasActiveTasks,
     completedTasks,
     hasPendingFiles,
     selectedTask,
     selectedStages,
+    selectedLogs,
     // Actions
     fetchTasks,
     startProcessing,
@@ -501,11 +707,26 @@ export const useProcessingStore = defineStore('processing', () => {
     clearPendingFiles,
     // 日志
     addLog,
+    addTaskLog,
     clearLogs,
+    clearTaskLogs,
+    initTaskLogs,
     // 阶段管理
     initTaskStages,
     updateTaskStage,
     selectTask,
+    // 多选管理
+    toggleTaskSelection,
+    selectAllTasks,
+    deselectAllTasks,
+    isSelected,
+    // 分组折叠
+    toggleGroupCollapse,
+    isGroupCollapsed,
+    // 批量操作
+    batchPauseTasks,
+    batchResumeTasks,
+    batchCancelTasks,
     // 状态同步
     syncTaskStatus,
     startStatusPolling,
