@@ -18,14 +18,8 @@ export const useProcessingStore = defineStore('processing', () => {
   // 新增：实时日志记录
   const logs = ref<LogEntry[]>([])
 
-  // 新增：WebSocket 连接管理
-  const wsConnections = ref<Map<string, WebSocket>>(new Map())
-
-  // WebSocket 重连控制
-  const wsRetryCount = ref<Map<string, number>>(new Map())
-  const wsRetryTimers = ref<Map<string, ReturnType<typeof setTimeout>>>(new Map())
-  const WS_MAX_RETRIES = 5
-  const WS_RETRY_DELAY = 3000 // 3 秒
+  // Tauri 事件监听器
+  let unlistenProgress: (() => void) | null = null
 
   // 新增：选中的任务 ID（右侧面板展示）
   const selectedTaskId = ref<string | null>(null)
@@ -53,7 +47,7 @@ export const useProcessingStore = defineStore('processing', () => {
   async function fetchTasks(projectId: number) {
     // 切换项目时清理旧状态
     if (currentProjectId.value !== null && currentProjectId.value !== projectId) {
-      disconnectAllWebSockets()
+      stopEventListener()
       tasks.value = []
       logs.value = []
       pendingFiles.value = []
@@ -89,7 +83,19 @@ export const useProcessingStore = defineStore('processing', () => {
         file_paths: filePaths,
       })
       // 添加 id 字段
-      const taskWithId = { ...task, id: task.task_id }
+      const taskWithId: ProcessingTask = {
+        id: task.task_id,
+        task_id: task.task_id,
+        project_id: task.project_id,
+        status: task.status,
+        total_files: filePaths.length,
+        processed_files: 0,
+        total_rows: 0,
+        processed_rows: 0,
+        success_count: 0,
+        error_count: 0,
+        batch_number: task.batch_number,
+      }
       tasks.value.unshift(taskWithId)
       activeTask.value = taskWithId
       // 初始化阶段并选中
@@ -110,9 +116,11 @@ export const useProcessingStore = defineStore('processing', () => {
     loading.value = true
     error.value = null
     try {
-      const task = await processingApi.pause(taskId)
-      const taskWithId = { ...task, id: task.task_id }
-      updateTaskInList(taskWithId)
+      await processingApi.pause(taskId)
+      const taskIndex = tasks.value.findIndex(t => t.id === taskId)
+      if (taskIndex !== -1) {
+        tasks.value[taskIndex].status = 'paused'
+      }
     } catch (e: any) {
       error.value = e.message
       console.error('Failed to pause task:', e)
@@ -126,11 +134,11 @@ export const useProcessingStore = defineStore('processing', () => {
     loading.value = true
     error.value = null
     try {
-      const task = await processingApi.resume(taskId)
-      const taskWithId = { ...task, id: task.task_id }
-      updateTaskInList(taskWithId)
-      // 恢复时重新连接 WebSocket
-      connectWebSocket(taskId)
+      await processingApi.resume(taskId)
+      const taskIndex = tasks.value.findIndex(t => t.id === taskId)
+      if (taskIndex !== -1) {
+        tasks.value[taskIndex].status = 'processing'
+      }
     } catch (e: any) {
       error.value = e.message
       console.error('Failed to resume task:', e)
@@ -144,11 +152,11 @@ export const useProcessingStore = defineStore('processing', () => {
     loading.value = true
     error.value = null
     try {
-      const task = await processingApi.cancel(taskId)
-      const taskWithId = { ...task, id: task.task_id }
-      updateTaskInList(taskWithId)
-      // 取消时断开 WebSocket
-      disconnectWebSocket(taskId)
+      await processingApi.cancel(taskId)
+      const taskIndex = tasks.value.findIndex(t => t.id === taskId)
+      if (taskIndex !== -1) {
+        tasks.value[taskIndex].status = 'cancelled'
+      }
     } catch (e: any) {
       error.value = e.message
       console.error('Failed to cancel task:', e)
@@ -309,113 +317,29 @@ export const useProcessingStore = defineStore('processing', () => {
     }
   }
 
-  // WebSocket 连接管理
-  function connectWebSocket(taskId: string) {
-    // 如果已存在连接，不重复连接
-    if (wsConnections.value.has(taskId)) {
-      return
-    }
-
-    // 检查重试次数
-    const retries = wsRetryCount.value.get(taskId) || 0
-    if (retries >= WS_MAX_RETRIES) {
-      addLog({
-        time: new Date().toLocaleTimeString('zh-CN'),
-        message: `任务 ${taskId.slice(0, 8)}... WebSocket 重连次数已达上限`,
-        type: 'warning',
-      })
-      return
-    }
+  // Tauri 事件监听
+  async function startEventListener() {
+    if (unlistenProgress) return // 已监听
 
     try {
-      const ws = processingApi.connectProgress(taskId)
-
-      ws.onopen = () => {
-        // 连接成功，重置重试计数
-        wsRetryCount.value.set(taskId, 0)
-        addLog({
-          time: new Date().toLocaleTimeString('zh-CN'),
-          message: `已连接到任务 ${taskId.slice(0, 8)}... 的进度流`,
-          type: 'info',
-        })
-        // 重连后立即从 API 同步任务状态（防止错过 completed 事件）
-        syncTaskStatus(taskId)
-      }
-
-      ws.onmessage = (event) => {
-        try {
-          const data = JSON.parse(event.data)
-          handleWebSocketMessage(data)
-        } catch (e) {
-          console.error('Failed to parse WebSocket message:', e)
-        }
-      }
-
-      ws.onerror = () => {
-        // 只记录日志，不在这里重连（由 onclose 处理）
-      }
-
-      ws.onclose = () => {
-        wsConnections.value.delete(taskId)
-
-        // 检查任务是否仍在活动状态，如果是则延迟重连
-        const task = tasks.value.find(t => t.id === taskId)
-        if (task && (task.status === 'processing' || task.status === 'paused')) {
-          const currentRetries = (wsRetryCount.value.get(taskId) || 0) + 1
-          wsRetryCount.value.set(taskId, currentRetries)
-
-          if (currentRetries < WS_MAX_RETRIES) {
-            addLog({
-              time: new Date().toLocaleTimeString('zh-CN'),
-              message: `进度流断开，${WS_RETRY_DELAY / 1000}s 后重连 (${currentRetries}/${WS_MAX_RETRIES})`,
-              type: 'warning',
-            })
-            const timer = setTimeout(() => {
-              wsRetryTimers.value.delete(taskId)
-              connectWebSocket(taskId)
-            }, WS_RETRY_DELAY)
-            wsRetryTimers.value.set(taskId, timer)
-          }
-        }
-      }
-
-      wsConnections.value.set(taskId, ws)
+      unlistenProgress = await processingApi.onProgress((data) => {
+        handleProgressEvent(data)
+      })
+      console.log('[Processing] Started event listener')
     } catch (e) {
-      console.error('Failed to connect WebSocket:', e)
+      console.error('[Processing] Failed to start event listener:', e)
     }
   }
 
-  function disconnectWebSocket(taskId: string) {
-    // 清除重连定时器
-    const timer = wsRetryTimers.value.get(taskId)
-    if (timer) {
-      clearTimeout(timer)
-      wsRetryTimers.value.delete(taskId)
-    }
-    wsRetryCount.value.delete(taskId)
-
-    const ws = wsConnections.value.get(taskId)
-    if (ws) {
-      ws.onclose = null // 防止触发重连逻辑
-      ws.close()
-      wsConnections.value.delete(taskId)
+  function stopEventListener() {
+    if (unlistenProgress) {
+      unlistenProgress()
+      unlistenProgress = null
+      console.log('[Processing] Stopped event listener')
     }
   }
 
-  function disconnectAllWebSockets() {
-    // 清除所有重连定时器
-    wsRetryTimers.value.forEach(timer => clearTimeout(timer))
-    wsRetryTimers.value.clear()
-    wsRetryCount.value.clear()
-
-    wsConnections.value.forEach((ws) => {
-      ws.onclose = null
-      ws.close()
-    })
-    wsConnections.value.clear()
-  }
-
-  function handleWebSocketMessage(data: any) {
+  function handleProgressEvent(data: ProcessingProgress) {
     const taskId = data.task_id
     // 确保阶段已初始化
     if (taskId && !taskStages.value.has(taskId)) {
@@ -488,9 +412,6 @@ export const useProcessingStore = defineStore('processing', () => {
           message: `任务完成: 成功 ${data.success_count}, 失败 ${data.error_count}`,
           type: 'success',
         })
-        if (taskId) {
-          disconnectWebSocket(taskId)
-        }
         break
 
       case 'error':
@@ -545,7 +466,6 @@ export const useProcessingStore = defineStore('processing', () => {
     error,
     pendingFiles,
     logs,
-    wsConnections,
     selectedTaskId,
     taskStages,
     // Getters
@@ -580,9 +500,9 @@ export const useProcessingStore = defineStore('processing', () => {
     syncTaskStatus,
     startStatusPolling,
     stopStatusPolling,
-    // WebSocket
-    connectWebSocket,
-    disconnectWebSocket,
-    disconnectAllWebSockets,
+    // Tauri 事件监听
+    startEventListener,
+    stopEventListener,
+    handleProgressEvent,
   }
 })

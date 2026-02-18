@@ -7,14 +7,10 @@
 ✅ **已完成的功能**：
 - **基础架构**：DDD 架构、错误处理、日志系统
 - **数据库层**：SeaORM、数据模型、自动迁移、加密工具
-- **Tauri Commands**：项目管理 Commands（完整 CRUD）
+- **Tauri Commands**：项目管理、字段管理、AI 配置、AI 服务、记录管理、Excel 解析、任务管理、数据处理 Commands
+- **进度推送**：Tauri 事件系统（替代 WebSocket）
 
 ⏳ **待实现的功能**：
-- 字段管理 Commands
-- AI 配置管理 Commands
-- 文件管理 Commands
-- 数据处理 Commands
-- 结果管理 Commands
 
 ## 🚀 快速开始
 
@@ -76,6 +72,66 @@ await window.__TAURI__.core.invoke('update_project', {
 await window.__TAURI__.core.invoke('delete_project', { id: 1 })
 ```
 
+### 测试记录管理功能
+
+```javascript
+// 插入单条记录（data 以 field_id 为 key）
+await window.__TAURI__.core.invoke('insert_record', {
+  projectId: 1,
+  data: {"3": "张三", "5": "13800138000"},
+  sourceFile: "test.xlsx",
+  sourceSheet: "Sheet1",
+  rowNumber: 1,
+  batchNumber: "batch_001"
+})
+
+// 批量插入
+await window.__TAURI__.core.invoke('insert_records_batch', {
+  projectId: 1,
+  records: [{"3": "李四", "5": "13900139000"}, {"3": "王五", "5": "13700137000"}],
+  sourceFile: "test.xlsx",
+  sourceSheet: "Sheet1",
+  batchNumber: "batch_001"
+})
+
+// 分页查询
+await window.__TAURI__.core.invoke('query_records', {
+  projectId: 1,
+  page: 1,
+  pageSize: 20
+})
+
+// 按字段过滤查询（json_extract）
+await window.__TAURI__.core.invoke('query_records', {
+  projectId: 1,
+  filters: {"5": "13800138000"}
+})
+
+// 获取单条记录
+await window.__TAURI__.core.invoke('get_record', { id: 1 })
+
+// 更新记录
+await window.__TAURI__.core.invoke('update_record', {
+  id: 1,
+  data: {"3": "张三丰", "5": "13800138000"}
+})
+
+// 去重检查
+await window.__TAURI__.core.invoke('check_duplicate', {
+  projectId: 1,
+  dedupValues: {"5": "13800138000"}
+})
+
+// 获取记录数
+await window.__TAURI__.core.invoke('get_record_count', { projectId: 1 })
+
+// 删除单条记录
+await window.__TAURI__.core.invoke('delete_record', { id: 1 })
+
+// 删除项目所有记录
+await window.__TAURI__.core.invoke('delete_project_records', { projectId: 1 })
+```
+
 ### 方式 3：通过前端代码测试
 
 在 Vue 组件中使用：
@@ -120,13 +176,63 @@ npm run tauri:dev  # 重新启动应用
 | `update_project` | `id: number, name?: string, description?: string, ...` | `Project` | ✅ |
 | `delete_project` | `id: number` | `void` | ✅ |
 
-## 待实现的功能
+### 记录管理
 
-- [ ] 字段管理 Commands
-- [ ] AI 配置管理 Commands
-- [ ] 文件管理 Commands
-- [ ] 数据处理 Commands
-- [ ] 结果管理 Commands
+| Command | 参数 | 返回值 | 状态 |
+|---------|------|--------|------|
+| `insert_record` | `projectId, data, sourceFile?, ...` | `ProjectRecord` | ✅ |
+| `insert_records_batch` | `projectId, records[], sourceFile?, ...` | `number` | ✅ |
+| `query_records` | `projectId, page?, pageSize?, filters?` | `QueryRecordsResponse` | ✅ |
+| `get_record` | `id: number` | `ProjectRecord` | ✅ |
+| `update_record` | `id: number, data: object` | `ProjectRecord` | ✅ |
+| `delete_record` | `id: number` | `void` | ✅ |
+| `delete_project_records` | `projectId: number` | `number` | ✅ |
+| `get_record_count` | `projectId, status?` | `number` | ✅ |
+| `check_duplicate` | `projectId, dedupValues` | `number \| null` | ✅ |
+
+### Excel 解析
+
+| Command | 参数 | 返回值 | 状态 |
+|---------|------|--------|------|
+| `get_excel_sheets` | `filePath: string` | `SheetInfo[]` | ✅ |
+| `preview_excel` | `filePath, sheetName?, maxRows?` | `ExcelPreview` | ✅ |
+
+### 任务管理
+
+| Command | 参数 | 返回值 | 状态 |
+|---------|------|--------|------|
+| `create_processing_task` | `projectId, totalFiles` | `TaskResponse` | ✅ |
+| `get_processing_task` | `taskId: string` | `TaskResponse` | ✅ |
+| `list_processing_tasks` | `projectId, status?` | `ListTasksResponse` | ✅ |
+| `update_task_status` | `taskId, status` | `TaskResponse` | ✅ |
+| `create_batch` | `projectId, batchNumber, fileCount` | `BatchResponse` | ✅ |
+| `get_batches` | `projectId` | `Batch[]` | ✅ |
+
+### 数据处理
+
+| Command | 参数 | 返回值 | 状态 |
+|---------|------|--------|------|
+| `start_processing` | `projectId, filePaths, aiConfigId?` | `StartProcessingResponse` | ✅ |
+| `pause_processing_task` | `taskId: string` | `void` | ✅ |
+| `resume_processing_task` | `taskId: string` | `void` | ✅ |
+| `cancel_processing_task` | `taskId: string` | `void` | ✅ |
+
+### 进度事件监听
+
+前端使用 Tauri 事件系统监听处理进度：
+
+```javascript
+import { listen } from '@tauri-apps/api/event'
+
+// 监听处理进度事件
+const unlisten = await listen('processing-progress', (event) => {
+  console.log('Progress:', event.payload)
+  // event.payload 包含: event, task_id, current_file, current_sheet, processed_rows, success_count, error_count 等
+})
+
+// 停止监听
+unlisten()
+```
 
 ## 📈 性能对比
 
@@ -225,11 +331,12 @@ git commit -m "feat: 实现 XXX 功能"
 ## 下一步
 
 1. ✅ 测试项目管理功能
-2. ⏳ 实现字段管理 Commands
-3. ⏳ 实现 AI 配置管理 Commands
-4. ⏳ 实现文件管理 Commands
-5. ⏳ 实现数据处理 Commands
-6. ⏳ 实现结果管理 Commands
+2. ✅ 实现字段管理 Commands
+3. ✅ 实现 AI 配置管理 Commands
+4. ✅ 实现记录管理 Commands（JSON 统一存储）
+5. ✅ 实现 Excel 解析 Commands
+6. ✅ 实现任务管理 Commands
+7. ✅ 实现数据处理 Commands（Tauri 事件系统）
 
 ## 📋 开发进展
 
@@ -244,11 +351,19 @@ git commit -m "feat: 实现 XXX 功能"
   - CORS 和日志中间件
 - ✅ **数据库层**：
   - SeaORM 1.0 集成
-  - 5 个 ORM 模型（Project, ProjectField, AiConfig, ProcessingTask, Batch）
+  - 6 个 ORM 模型（Project, ProjectField, AiConfig, ProcessingTask, Batch, ProjectRecord）
   - 自动数据库迁移
   - API 密钥加密（AES-256-GCM）
 - ✅ **Tauri Commands**：
   - 项目管理 Commands（get_projects, create_project, get_project, update_project, delete_project）
+  - 字段管理 Commands（7 个命令）
+  - AI 配置 Commands（8 个命令）
+  - AI 服务 Commands（2 个命令）
+  - 记录管理 Commands（9 个命令，JSON 统一存储）
+  - Excel 解析 Commands（2 个命令）
+  - 任务管理 Commands（6 个命令）
+  - 数据处理 Commands（4 个命令，AI 列映射 + 本地验证导入）
+  - Tauri 事件系统推送进度
   - 数据库状态管理（Arc<DatabaseConnection>）
   - 前端 API 客户端集成（invoke()）
 - ✅ **文档**：
@@ -261,14 +376,6 @@ git commit -m "feat: 实现 XXX 功能"
 - 启动时间：~1 秒（比 HTTP API 快 2-3x）
 - 内存占用：~10 MB（比 HTTP API 少 30-50%）
 - 架构复杂度：显著降低（无需 HTTP 服务器）
-
-**待实现**：
-- ⏳ 字段管理 Commands（5 个命令）
-- ⏳ AI 配置管理 Commands（5 个命令）
-- ⏳ 文件管理 Commands（上传、预览、批次管理）
-- ⏳ 数据处理 Commands（启动、暂停、恢复、取消）
-- ⏳ 结果管理 Commands（查询、更新、导出）
-- ⏳ WebSocket 实时进度更新
 
 ### v2.4.0 - Python 后端完整实现
 

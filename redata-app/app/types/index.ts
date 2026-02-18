@@ -35,11 +35,13 @@ export interface ProjectField {
   field_type: string
   is_required: boolean
   is_dedup_key: boolean  // 是否参与去重
+  is_deleted: boolean    // 软删除标记
   additional_requirement?: string | null
   validation_rule: string | null
   extraction_hint: string | null
   display_order: number
   created_at: string
+  deleted_at: string | null  // 删除时间
 }
 
 export interface CreateFieldRequest {
@@ -64,6 +66,28 @@ export interface FieldMetadata {
   field_name: string
   validation_rule: string | null
   extraction_hint: string
+}
+
+// AI 列映射分析类型
+export interface FieldDefinition {
+  field_name: string
+  field_label: string
+  field_type: string
+  additional_requirement?: string | null
+}
+
+export interface FieldMapping {
+  field_name: string
+  column_index: number
+  column_header: string
+  confidence: number
+}
+
+export interface ColumnMappingResponse {
+  header_row: number
+  mappings: FieldMapping[]
+  confidence: number
+  unmatched_columns: number[]
 }
 
 // AI 配置类型
@@ -182,4 +206,42 @@ export interface ExcelPreview {
   sheets: SheetInfo[]
   rows: any[][]
   sheet_name: string
+}
+
+// 项目记录类型（JSON 统一存储，data 以 field_id 为 key）
+export interface ProjectRecord {
+  id: number
+  project_id: number
+  data: Record<string, any>  // key 为 field_id 字符串
+  source_file: string | null
+  source_sheet: string | null
+  row_number: number | null
+  batch_number: string | null
+  status: string
+  error_message: string | null
+  created_at: string
+  updated_at: string | null
+}
+
+export interface QueryRecordsResponse {
+  records: ProjectRecord[]
+  total: number
+  page: number
+  page_size: number
+}
+
+// 批次类型
+export interface Batch {
+  id: number
+  batch_number: string
+  project_id: number
+  file_count: number
+  record_count: number
+  created_at: string
+}
+
+// 任务列表响应
+export interface ListTasksResponse {
+  tasks: ProcessingTask[]
+  total: number
 }

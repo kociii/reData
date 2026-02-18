@@ -35,20 +35,73 @@
   - 更快的响应速度：无序列化/反序列化开销
   - 类型安全：Rust 类型系统保证数据一致性
 
-- **后端 → 前端**: 通过 WebSocket 进行实时进度更新（待实现）
+- **后端 → 前端**: 通过 Tauri 事件系统进行实时进度更新
+  - `app.emit("processing-progress", &event)` 发送进度事件
+  - 前端通过 `listen('processing-progress', callback)` 接收
+  - 零延迟、原生桌面性能
 
 ### Tauri Commands 实现进度
 
 **已实现**：
 - ✅ 项目管理 Commands（`commands/projects.rs`）
   - get_projects, get_project, create_project, update_project, delete_project
+- ✅ 字段管理 Commands（`commands/fields.rs`）
+  - get_fields, get_all_fields, create_field, update_field, delete_field, restore_field, generate_field_metadata
+- ✅ AI 配置 Commands（`commands/ai_configs.rs`）
+  - get_ai_configs, get_ai_config, get_default_ai_config, create_ai_config, update_ai_config, delete_ai_config, set_default_ai_config, test_ai_connection
+- ✅ AI 服务 Commands（`commands/ai_service.rs`）
+  - analyze_column_mapping, ai_generate_field_metadata
+- ✅ 记录管理 Commands（`commands/records.rs`）
+  - insert_record, insert_records_batch, query_records, get_record, update_record, delete_record, delete_project_records, get_record_count, check_duplicate
+- ✅ AI 工具函数（`commands/ai_utils.rs`）
+  - call_ai, extract_json（共享 AI 调用工具）
+- ✅ Excel 解析 Commands（`commands/excel.rs`）
+  - get_excel_sheets, preview_excel
+- ✅ 任务管理 Commands（`commands/tasks.rs`）
+  - create_processing_task, get_processing_task, list_processing_tasks, update_task_status, create_batch, get_batches
+- ✅ 数据处理 Commands（`commands/processing.rs`）
+  - start_processing, pause_processing_task, resume_processing_task, cancel_processing_task
+  - 实现两阶段处理流程（AI 列映射 + 本地验证导入）
+  - 使用 Tauri 事件系统推送进度
 
-**待实现**：
-- ⏳ 字段管理 Commands
-- ⏳ AI 配置 Commands
-- ⏳ 文件处理 Commands
-- ⏳ 数据处理 Commands
-- ⏳ 结果查询 Commands
+**总计**：36 个 Tauri Commands 已实现 🚀
+
+### Tauri 参数命名约定 ⚠️
+
+**重要**：Tauri 2.x 的 `#[tauri::command]` 宏会将 Rust 的蛇形命名参数（snake_case）自动转换为驼峰命名（camelCase）。
+
+**规则**：
+- Rust 端定义：`api_url: String`
+- 前端调用时：`invoke('create_ai_config', { apiUrl: '...' })`
+
+**常见转换**：
+| Rust 参数名 | 前端调用键名 |
+|------------|-------------|
+| `api_url` | `apiUrl` |
+| `model_name` | `modelName` |
+| `api_key` | `apiKey` |
+| `is_default` | `isDefault` |
+| `project_id` | `projectId` |
+| `field_name` | `fieldName` |
+| `field_type` | `fieldType` |
+| `is_required` | `isRequired` |
+| `is_dedup_key` | `isDedupKey` |
+| `additional_requirement` | `additionalRequirement` |
+| `validation_rule` | `validationRule` |
+| `extraction_hint` | `extractionHint` |
+| `ai_config_id` | `aiConfigId` |
+| `sheet_headers` | `sheetHeaders` |
+| `field_definitions` | `fieldDefinitions` |
+| `sample_rows` | `sampleRows` |
+| `source_file` | `sourceFile` |
+| `source_sheet` | `sourceSheet` |
+| `row_number` | `rowNumber` |
+| `batch_number` | `batchNumber` |
+| `error_message` | `errorMessage` |
+| `page_size` | `pageSize` |
+| `dedup_values` | `dedupValues` |
+
+**注意**：前端 TypeScript 类型定义仍使用蛇形命名（与数据库字段一致），只在 `invoke()` 调用时转换为驼峰命名。
 
 ### 两阶段数据处理方案
 
@@ -70,15 +123,16 @@
 **核心表**：
 1. **projects** - 项目表（名称、描述、去重配置）
 2. **project_fields** - 字段定义表（字段名、类型、验证规则、AI 提示）
-3. **project_{id}_records** - 动态创建的项目数据表（每个项目独立）
+3. **project_records** - 统一记录表（JSON `data` 列，以 field_id 为 key）
 4. **processing_tasks** - 任务跟踪（UUID、状态枚举）
 5. **ai_configs** - AI 配置（加密的 API 密钥）
 6. **batches** - 批次统计
 
 **关键特性**：
-- 每个项目创建独立的数据表，表结构根据字段定义动态生成
-- 支持动态添加/删除字段（ALTER TABLE 或重建表）
-- 根据去重配置创建 UNIQUE 索引
+- 使用 JSON 统一存储方案：`data` 列以 `field_id` 为 key（如 `{"3": "张三", "5": "13800138000"}`）
+- 字段改名、调序零成本（只改 `project_fields` 表，记录不动）
+- 支持 `json_extract()` 进行字段级查询和去重检查
+- 根据去重配置动态构建 `json_extract` 查询
 
 ## 开发命令
 
@@ -139,6 +193,14 @@ npm run tauri:build
 ### 后端（`redata-app/src-tauri/src/`）
 - `commands/` - Tauri Commands（前端调用入口）
   - `projects.rs` - 项目管理 Commands ✅
+  - `fields.rs` - 字段管理 Commands ✅
+  - `ai_configs.rs` - AI 配置 Commands ✅
+  - `ai_service.rs` - AI 服务 Commands ✅
+  - `ai_utils.rs` - AI 工具函数（共享 call_ai, extract_json）✅
+  - `records.rs` - 记录管理 Commands ✅
+  - `excel.rs` - Excel 解析 Commands ✅
+  - `tasks.rs` - 任务管理 Commands ✅
+  - `processing.rs` - 数据处理 Commands（两阶段处理 + 事件系统）✅
 - `backend/` - 核心业务逻辑（DDD 架构）
   - `domain/` - 领域层（实体、值对象、仓储接口）
   - `application/` - 应用层（用例、DTO）
@@ -149,6 +211,81 @@ npm run tauri:build
 - `redata-app/backend/` - Python FastAPI 后端（保留用于参考）
   - `src/redata/services/` - 业务逻辑（ai_client, validator, excel_parser, extractor, storage）
 
+## Rust AI 集成
+
+项目使用 `async-openai` 库（v0.24）进行 AI 调用，完全兼容 OpenAI API 规范。
+
+### 支持的平台
+
+- OpenAI (GPT-4, GPT-4o, etc.)
+- Anthropic Claude（通过兼容层）
+- Ollama 本地模型
+- vLLM 自托管
+- 其他 OpenAI 兼容 API
+
+### 核心功能
+
+- **自定义 API Base URL**：支持连接 Ollama、vLLM 等自托管服务
+- **JSON 结构化输出**：通过 `ResponseFormat` 类型实现
+- **流式响应**（可选）：使用 `create_stream()` 方法
+- **内置 429 重试**：HTTP 429 自动重试，指数退避
+- **可配置超时**：通过自定义 `reqwest::Client`
+
+### async-openai 使用示例
+
+**自定义 Base URL（支持 Ollama）**：
+```rust
+use async_openai::{Client, config::OpenAIConfig};
+
+let config = OpenAIConfig::new()
+    .with_api_base("http://localhost:11434/v1")
+    .with_api_key("ollama");
+let client = Client::with_config(config);
+```
+
+**Chat Completions 调用**：
+```rust
+use async_openai::types::{CreateChatCompletionRequestArgs, ChatCompletionRequestUserMessageArgs};
+
+let request = CreateChatCompletionRequestArgs::default()
+    .model("gpt-4")
+    .messages([ChatCompletionRequestUserMessageArgs::default()
+        .content("你好")
+        .build()?.into()])
+    .temperature(0.7)
+    .build()?;
+
+let response = client.chat().create(request).await?;
+```
+
+**JSON 结构化输出**：
+```rust
+.request(.response_format(ResponseFormat {
+    r#type: ChatCompletionResponseFormatType::JsonObject,
+}))
+```
+
+### 相关文件
+
+- `src-tauri/src/backend/services/ai_client.rs` - AI 客户端服务（待实现）
+- `src-tauri/src/backend/infrastructure/config/crypto.rs` - API 密钥加密
+- `src-tauri/src/backend/infrastructure/persistence/models/ai_config.rs` - AI 配置模型
+
+### AI 配置数据结构
+
+```rust
+pub struct AiConfig {
+    pub id: i32,
+    pub name: String,
+    pub api_url: String,      // 支持 OpenAI/Ollama/vLLM 等
+    pub model_name: String,
+    pub api_key: String,      // AES-256-GCM 加密存储
+    pub temperature: f32,
+    pub max_tokens: i32,
+    pub is_default: bool,
+}
+```
+
 ## 安全考虑
 
 - API 密钥使用 AES-256-GCM 加密存储
@@ -158,7 +295,47 @@ npm run tauri:build
 
 ## 已知问题和修复
 
-### WebSocket 连接问题 (v2.4.1)
+### 字段操作导致应用重启 (v2.5.0)
+
+**问题**：开发模式下，新建、编辑或删除字段时，应用会"闪退"并自动重启
+
+**根本原因**：
+Tauri dev server 的热重载文件监听器监控了 `src-tauri/` 整个目录。每次数据库写操作（INSERT/UPDATE/DELETE）都会修改 `data/app.db` 和 `data/app.db-journal` 文件，Tauri 将其误判为源码变更，触发应用重建重启。
+
+**表现**：
+- 终端日志显示 `Info File src-tauri/data/app.db-journal changed. Rebuilding application...`
+- Rust 端命令实际执行成功（数据库操作已完成），但随后应用被重启
+
+**修复**：
+1. 创建 `src-tauri/.taurignore` 文件，排除数据库文件的监听：
+   ```
+   data/*.db
+   data/*.db-journal
+   data/*.db-wal
+   data/*.db-shm
+   ```
+2. Rust 端 `create_field` 和 `update_field` 函数添加空字符串处理，将空字符串自动转为 `None`
+3. 前端 API 调用时使用驼峰命名（如 `fieldName` 而非 `field_name`）
+
+**相关文件**：
+- `src-tauri/.taurignore` - Tauri 文件监听排除规则（关键修复）
+- `src-tauri/src/commands/fields.rs` - 添加空值处理逻辑
+- `app/utils/api.ts` - 修正 Tauri invoke 参数命名
+
+**代码示例**（Rust 端空值处理）：
+```rust
+// 处理可选字段：空字符串转为 None
+let additional_requirement = additional_requirement
+    .and_then(|s| if s.trim().is_empty() { None } else { Some(s.trim().to_string()) });
+let validation_rule = validation_rule
+    .and_then(|s| if s.trim().is_empty() { None } else { Some(s) });
+let extraction_hint = extraction_hint
+    .and_then(|s| if s.trim().is_empty() { None } else { Some(s.trim().to_string()) });
+```
+
+### WebSocket 连接问题 (v2.4.1) - 已弃用
+
+> **注意**：WebSocket 已在 v2.6.0 被 Tauri 事件系统替代。以下内容仅作历史记录。
 
 **问题**：文件导入时 WebSocket 连接错误，task_id 为空
 
@@ -166,17 +343,64 @@ npm run tauri:build
 
 **修复**：在 `start_processing` 函数中提前生成 task_id 和 batch_number
 
-**相关文件**：
-- `backend/src/redata/api/processing.py` - 修复了 task_id 生成逻辑
-- `backend/src/redata/services/storage.py` - 添加了智能表结构迁移功能
-- `backend/src/redata/models/project.py` - 添加了字段软删除支持
+### Tauri 事件系统 (v2.6.0)
+
+**架构变化**：WebSocket → Tauri Events
+
+**优势**：
+- 零延迟：原生桌面 IPC 通信
+- 更简单：无需管理连接/重连
+- 更可靠：Tauri 框架原生支持
+
+**使用方式**：
+
+**后端发送事件**（`processing.rs`）：
+```rust
+app.emit("processing-progress", &ProcessingEvent {
+    event: "row_processed".to_string(),
+    task_id: Some(task_id.clone()),
+    processed_rows: Some(processed),
+    total_rows: Some(total),
+    ..Default::default()
+})?;
+```
+
+**前端监听事件**（`processing.ts`）：
+```typescript
+import { listen } from '@tauri-apps/api/event'
+
+unlistenProgress = await processingApi.onProgress((data) => {
+  handleProgressEvent(data)
+})
+```
+
+**事件类型**：
+- `file_start` / `file_complete` - 文件开始/完成
+- `sheet_start` / `sheet_complete` - Sheet 开始/完成
+- `ai_analyzing` - AI 分析中
+- `column_mapping` - 列映射完成
+- `row_processed` - 行处理进度（每 10 行节流）
+- `completed` / `error` / `warning` - 任务状态
 
 ## 开发进度
 
-**v2.5.0（当前版本）**：
+**v2.6.0（当前版本）**：
+- ✅ 文件处理 Commands（Excel 解析：get_excel_sheets, preview_excel）
+- ✅ 任务管理 Commands（6 个命令）
+- ✅ 数据处理 Commands（两阶段处理：start_processing, pause/resume/cancel）
+- ✅ Tauri 事件系统（替代 WebSocket，实时进度推送）
+- ✅ 前端 Store 重构（processing.ts 使用 Tauri events）
+- ✅ 前端页面适配（processing.vue）
+- ✅ 总计 36 个 Tauri Commands 已实现
+
+**v2.5.0**：
 - ✅ 实现 Tauri Commands 模式（项目管理）
 - ✅ 零网络开销的前后端通信
-- ⏳ 其他功能模块迁移到 Tauri Commands
+- ✅ 字段管理 Commands（7 个命令）
+- ✅ AI 配置 Commands（8 个命令）
+- ✅ AI 服务 Commands（2 个命令）
+- ✅ 记录管理 Commands（9 个命令，JSON 统一存储）
+- ✅ 前端 API 迁移到 Tauri invoke
 
 **v2.4.0**：
 - ✅ 完成所有 10 个开发阶段（Python 后端）

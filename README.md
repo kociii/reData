@@ -22,6 +22,7 @@ reData 是一个多项目管理系统，允许用户创建不同的项目，每�
 - ✅ **本地验证导入** - 格式规则验证，无需额外 AI 调用
 - 🔄 **可配置去重** - 灵活的去重策略（skip/update/merge）
 - ⚡ **多文件并行处理** - 实时进度跟踪
+- 📡 **Tauri 事件系统** - 实时进度推送，零延迟通信
 - 💾 **本地 SQLite 存储** - 完整数据可追溯
 - 🎨 **AI 辅助字段定义** - 自动生成字段元数据
 
@@ -109,13 +110,17 @@ npm run tauri:build
 ## 🎯 实现进度
 
 **Tauri Commands 实现**：
-- ✅ **项目管理** - 完整 CRUD 操作（get_projects, create_project, update_project, delete_project）
-- ⏳ **字段管理** - 待实现
-- ⏳ **AI 配置管理** - 待实现
-- ⏳ **文件管理** - 待实现
-- ⏳ **数据处理核心** - 待实现
-- ⏳ **处理任务管理** - 待实现
-- ⏳ **结果管理** - 待实现
+- ✅ **项目管理** - 完整 CRUD 操作（get_projects, get_project, create_project, update_project, delete_project）
+- ✅ **字段管理** - 完整字段管理（get_fields, get_all_fields, create_field, update_field, delete_field, restore_field, generate_field_metadata）
+- ✅ **AI 配置管理** - AI 配置 CRUD（get_ai_configs, get_ai_config, get_default_ai_config, create_ai_config, update_ai_config, delete_ai_config, set_default_ai_config, test_ai_connection）
+- ✅ **AI 服务** - AI 分析服务（analyze_column_mapping, ai_generate_field_metadata）
+- ✅ **记录管理** - 记录 CRUD（insert_record, insert_records_batch, query_records, get_record, update_record, delete_record, delete_project_records, get_record_count, check_duplicate）
+- ✅ **Excel 解析** - 文件预览（get_excel_sheets, preview_excel）
+- ✅ **任务管理** - 任务跟踪（create_processing_task, get_processing_task, list_processing_tasks, update_task_status, create_batch, get_batches）
+- ✅ **数据处理核心** - 两阶段处理流程（start_processing, pause_processing_task, resume_processing_task, cancel_processing_task）
+- ✅ **Tauri 事件系统** - 实时进度推送（替代 WebSocket）
+
+**总计**：36 个 Tauri Commands 已实现 🚀
 
 ## 📚 文档
 
@@ -152,5 +157,5 @@ npm run tauri:build
 
 ---
 
-**版本**: v2.5.0
+**版本**: v2.6.0
 **最后更新**: 2026-02-18

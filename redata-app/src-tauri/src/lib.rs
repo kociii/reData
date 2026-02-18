@@ -7,9 +7,9 @@ pub mod commands;
 
 use std::process::{Child, Command};
 use std::sync::{Arc, Mutex};
-use sea_orm::DatabaseConnection;
 
-// 全局变量存储后端进程
+// 全局变量存储后端进程（旧的 HTTP 后端，已弃用）
+#[allow(dead_code)]
 static BACKEND_PROCESS: Mutex<Option<Child>> = Mutex::new(None);
 
 #[tauri::command]
@@ -18,6 +18,8 @@ fn greet(name: &str) -> String {
 }
 
 // 启动 Rust 后端服务器（在独立线程中）
+// 注意: 此函数已弃用，现在使用 Tauri Commands 而不是 HTTP API
+#[allow(dead_code)]
 fn start_rust_backend() {
     std::thread::spawn(|| {
         let runtime = tokio::runtime::Runtime::new().unwrap();
@@ -113,7 +115,8 @@ fn start_python_backend_server() -> Result<Child, std::io::Error> {
     Ok(child)
 }
 
-// 停止后端服务器
+// 停止后端服务器（已弃用）
+#[allow(dead_code)]
 fn stop_backend_server() {
     if let Ok(mut process) = BACKEND_PROCESS.lock() {
         if let Some(mut child) = process.take() {
@@ -155,11 +158,57 @@ pub fn run() {
         .manage(db)
         .invoke_handler(tauri::generate_handler![
             greet,
+            // 项目管理 Commands
             commands::get_projects,
             commands::create_project,
             commands::get_project,
             commands::update_project,
             commands::delete_project,
+            // 字段管理 Commands
+            commands::get_fields,
+            commands::get_all_fields,
+            commands::create_field,
+            commands::update_field,
+            commands::delete_field,
+            commands::restore_field,
+            commands::generate_field_metadata,
+            // AI 配置 Commands
+            commands::get_ai_configs,
+            commands::get_ai_config,
+            commands::get_default_ai_config,
+            commands::create_ai_config,
+            commands::update_ai_config,
+            commands::delete_ai_config,
+            commands::set_default_ai_config,
+            commands::test_ai_connection,
+            // AI 服务 Commands
+            commands::analyze_column_mapping,
+            commands::ai_generate_field_metadata,
+            // 记录管理 Commands
+            commands::insert_record,
+            commands::insert_records_batch,
+            commands::query_records,
+            commands::get_record,
+            commands::update_record,
+            commands::delete_record,
+            commands::delete_project_records,
+            commands::get_record_count,
+            commands::check_duplicate,
+            // Excel 解析 Commands
+            commands::get_excel_sheets,
+            commands::preview_excel,
+            // 任务管理 Commands
+            commands::create_processing_task,
+            commands::get_processing_task,
+            commands::list_processing_tasks,
+            commands::update_task_status,
+            commands::create_batch,
+            commands::get_batches,
+            // 处理 Commands
+            commands::start_processing,
+            commands::pause_processing_task,
+            commands::resume_processing_task,
+            commands::cancel_processing_task,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

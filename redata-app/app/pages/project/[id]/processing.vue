@@ -285,7 +285,6 @@ async function startAllPending() {
     const filePaths = store.pendingFiles.map(f => f.path)
     const task = await store.startProcessing(projectId.value, filePaths)
     store.clearPendingFiles()
-    store.connectWebSocket(task.task_id)
     toast.add({ title: '已开始批量处理', description: `${filePaths.length} 个文件`, color: 'success' })
   } catch (error: any) {
     toast.add({ title: '批量启动失败', description: error?.message || String(error), color: 'error' })
@@ -391,25 +390,10 @@ watch(
   }
 )
 
-// 监听活动任务，自动连接 WebSocket
-watch(
-  () => store.activeTasks,
-  (activeTasks) => {
-    activeTasks.forEach(task => {
-      if (!store.wsConnections.has(task.id)) {
-        store.connectWebSocket(task.id)
-      }
-    })
-  },
-  { deep: true }
-)
-
 onMounted(async () => {
+  // 启动 Tauri 事件监听
+  await store.startEventListener()
   await store.fetchTasks(projectId.value)
-  // 为所有进行中的任务连接 WebSocket
-  store.activeTasks.forEach(task => {
-    store.connectWebSocket(task.id)
-  })
   // 启动状态轮询（兜底）
   store.startStatusPolling()
   // 自动选中第一个活动任务
@@ -421,7 +405,7 @@ onMounted(async () => {
 })
 
 onUnmounted(() => {
-  store.disconnectAllWebSockets()
+  store.stopEventListener()
   store.stopStatusPolling()
 })
 </script>
