@@ -685,7 +685,12 @@ async fn process_single_file(
                         // 根据字段类型清理数据
                         let value = clean_value(&row[col_idx], &field.field_type);
 
-                        // 验证
+                        // 必填字段验证
+                        if field.is_required && value.trim().is_empty() {
+                            validation_errors.push(format!("{} 为必填项", field.field_label));
+                        }
+
+                        // 格式验证
                         let rule = field.validation_rule.as_deref();
                         if !validate_value(&value, rule) {
                             validation_errors.push(format!("{} 验证失败", field.field_label));
@@ -693,6 +698,9 @@ async fn process_single_file(
 
                         // 存储（使用 field_id 作为 key）
                         data.insert(field.id.to_string(), serde_json::Value::String(value));
+                    } else if field.is_required {
+                        // 列不存在但字段必填
+                        validation_errors.push(format!("{} 为必填项", field.field_label));
                     }
                 }
             }

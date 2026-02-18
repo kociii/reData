@@ -327,19 +327,9 @@
               </UButton>
             </div>
             <template v-else>
-              <!-- Sheet 选择器 -->
-              <div v-if="rawSheets.length > 1" class="flex gap-1 mb-2 flex-wrap">
-                <UButton
-                  v-for="sheet in rawSheets"
-                  :key="sheet.name"
-                  :variant="currentSheet === sheet.name ? 'soft' : 'ghost'"
-                  :color="currentSheet === sheet.name ? 'primary' : 'neutral'"
-                  size="xs"
-                  @click="switchSheet(sheet.name)"
-                >
-                  {{ sheet.name }}
-                  <UBadge variant="subtle" size="xs" class="ml-1">{{ sheet.row_count }}</UBadge>
-                </UButton>
+              <!-- 数据来源信息 -->
+              <div v-if="rawSheets.length > 0" class="text-xs text-muted mb-2">
+                来源: {{ rawSheets.map(s => s.name).join(', ') }}
               </div>
               <!-- 数据表格 -->
               <div class="flex-1 overflow-auto bg-muted rounded-lg">
@@ -348,11 +338,11 @@
                     <tr>
                       <th class="border-b border-default px-2 py-1 text-left text-muted font-medium w-8">#</th>
                       <th
-                        v-for="(_, colIndex) in (rawData.rows[0] || [])"
+                        v-for="(header, colIndex) in (rawData.rows[0] || [])"
                         :key="colIndex"
                         class="border-b border-default px-2 py-1 text-left text-muted font-medium"
                       >
-                        {{ String.fromCharCode(65 + colIndex) }}
+                        字段{{ header }}
                       </th>
                     </tr>
                   </thead>
@@ -438,9 +428,8 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { open } from '@tauri-apps/plugin-dialog'
 import { useProcessingStore } from '~/stores/processing'
-import { filesApi, recordsApi } from '~/utils/api'
+import { recordsApi } from '~/utils/api'
 import type { PendingFile, ExcelPreview, ProjectRecord, ProjectField } from '~/types'
 
 const route = useRoute()
@@ -648,10 +637,10 @@ function switchViewMode(mode: 'logs' | 'raw' | 'results') {
   }
 }
 
-// 加载原始数据
+// 加载原始数据（从数据库记录中获取）
 async function loadRawData() {
-  if (!store.selectedTask?.source_files?.length) {
-    toast.add({ title: '没有源文件信息', color: 'warning' })
+  if (!store.selectedTask?.batch_number) {
+    toast.add({ title: '没有批次信息', color: 'warning' })
     return
   }
 
@@ -660,57 +649,62 @@ async function loadRawData() {
   rawSheets.value = []
 
   try {
-    // 获取第一个源文件的路径（需要从文件名反推或存储完整路径）
-    // 这里暂时用 toast 提示，实际需要存储完整文件路径
-    // 由于当前只存储了文件名，这里先显示提示
-    toast.add({ title: '提示：原始数据预览需要重新选择文件', color: 'info' })
-
-    // 让用户重新选择文件
-    const selected = await open({
-      multiple: false,
-      filters: [{ name: 'Excel Files', extensions: ['xlsx', 'xls', 'csv'] }],
+    // 从数据库查询该批次的所有记录（包含 raw_data）
+    const response = await recordsApi.query(projectId.value, {
+      batch_number: store.selectedTask.batch_number,
+      page: 1,
+      page_size: 1000,
     })
 
-    if (!selected) {
+    if (response.records.length === 0) {
+      toast.add({ title: '没有找到原始数据', color: 'warning' })
       rawDataLoading.value = false
       return
     }
 
-    const filePath = selected as string
+    // 提取 raw_data 构建表格数据
+    const rows: any[][] = []
+    const sourceFiles = new Set<string>()
+    const sourceSheets = new Set<string>()
 
-    // 获取 sheet 列表
-    const preview = await filesApi.preview(filePath, undefined, 100)
-    rawSheets.value = preview.sheets
-    currentSheet.value = preview.sheet_name
-    rawData.value = preview
+    // 收集所有字段 ID 作为表头
+    const fieldIds = new Set<string>()
+    response.records.forEach(record => {
+      if (record.data) {
+        Object.keys(record.data).forEach(key => fieldIds.add(key))
+      }
+    })
+
+    // 构建表头行（字段 ID）
+    const headerRow = Array.from(fieldIds)
+    rows.push(headerRow)
+
+    // 构建数据行
+    response.records.forEach(record => {
+      if (record.data) {
+        const row: any[] = headerRow.map(fieldId => record.data[fieldId] ?? '')
+        rows.push(row)
+      }
+      if (record.source_file) sourceFiles.add(record.source_file)
+      if (record.source_sheet) sourceSheets.add(record.source_sheet)
+    })
+
+    // 构造 ExcelPreview 格式的数据
+    const sheets = Array.from(sourceSheets).map(name => ({
+      name,
+      row_count: rows.length - 1,
+      column_count: headerRow.length,
+    }))
+
+    rawData.value = {
+      sheets,
+      rows,
+      sheet_name: sheets[0]?.name || '数据',
+    }
+    rawSheets.value = sheets
+    currentSheet.value = rawData.value.sheet_name
   } catch (error: any) {
     toast.add({ title: '加载原始数据失败', description: error?.message, color: 'error' })
-  } finally {
-    rawDataLoading.value = false
-  }
-}
-
-// 切换 Sheet
-async function switchSheet(sheetName: string) {
-  if (!store.selectedTask?.source_files?.length || rawDataLoading.value) return
-
-  rawDataLoading.value = true
-  try {
-    const selected = await open({
-      multiple: false,
-      filters: [{ name: 'Excel Files', extensions: ['xlsx', 'xls', 'csv'] }],
-    })
-
-    if (!selected) {
-      rawDataLoading.value = false
-      return
-    }
-
-    const preview = await filesApi.preview(selected as string, sheetName, 100)
-    rawData.value = preview
-    currentSheet.value = sheetName
-  } catch (error: any) {
-    toast.add({ title: '切换 Sheet 失败', description: error?.message, color: 'error' })
   } finally {
     rawDataLoading.value = false
   }
@@ -730,7 +724,7 @@ async function loadTaskResults(batchNumber: string | null) {
     const response = await recordsApi.query(projectId.value, {
       batch_number: batchNumber,
       page: 1,
-      page_size: 100,
+      page_size: 1000, // 增加分页大小
     })
     resultsData.value = response.records
     resultsTotal.value = response.total
