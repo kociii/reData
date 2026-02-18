@@ -472,6 +472,7 @@ export const resultsApi = {
       pageSize: params.page_size,
       batchNumber: params.batch_number,
       status: params.status,
+      search: params.search,
     })
 
     // 转换为 QueryResult 格式（保持向后兼容）

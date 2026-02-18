@@ -102,7 +102,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch, onMounted } from 'vue'
+import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import { useFieldStore } from '~/stores/field'
 import { resultsApi } from '~/utils/api'
 
@@ -117,8 +117,9 @@ const totalCount = ref(0)
 const currentPage = ref(1)
 const pageSize = 50
 
-// 搜索
+// 搜索（带防抖）
 const searchQuery = ref('')
+let searchTimeout: ReturnType<typeof setTimeout> | null = null
 
 // 字段定义
 const fields = computed(() => fieldStore.fields)
@@ -161,12 +162,20 @@ async function loadData() {
 
 watch(currentPage, () => loadData())
 watch(searchQuery, () => {
-  currentPage.value = 1
-  loadData()
+  // 防抖：延迟 300ms 后执行搜索
+  if (searchTimeout) clearTimeout(searchTimeout)
+  searchTimeout = setTimeout(() => {
+    currentPage.value = 1
+    loadData()
+  }, 300)
 })
 
 onMounted(async () => {
   await fieldStore.fetchFields(projectId.value)
   await loadData()
+})
+
+onUnmounted(() => {
+  if (searchTimeout) clearTimeout(searchTimeout)
 })
 </script>

@@ -142,7 +142,7 @@ pub async fn insert_records_batch(
     Ok(count)
 }
 
-/// 分页查询记录（支持 json_extract 过滤）
+/// 分页查询记录（支持搜索和 json_extract 过滤）
 #[tauri::command]
 pub async fn query_records(
     db: tauri::State<'_, Arc<DatabaseConnection>>,
@@ -151,6 +151,7 @@ pub async fn query_records(
     page_size: Option<u64>,
     batch_number: Option<String>,
     status: Option<String>,
+    search: Option<String>,
     filters: Option<HashMap<String, String>>,
 ) -> Result<QueryRecordsResponse, String> {
     let page = page.unwrap_or(1).max(1);
@@ -168,6 +169,13 @@ pub async fn query_records(
     if let Some(st) = &status {
         conditions.push("status = ?".to_string());
         params.push(st.clone());
+    }
+    // 搜索：在 JSON data 字段中模糊匹配
+    if let Some(s) = &search {
+        if !s.trim().is_empty() {
+            conditions.push("data LIKE ?".to_string());
+            params.push(format!("%{}%", s.trim()));
+        }
     }
     if let Some(f) = &filters {
         for (field_id, value) in f {
