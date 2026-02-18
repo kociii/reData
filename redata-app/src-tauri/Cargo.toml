@@ -4,6 +4,7 @@ version = "0.1.0"
 description = "智能数据处理平台"
 authors = ["reData Team"]
 edition = "2021"
+default-run = "redata"
 
 [lib]
 name = "redata_lib"
