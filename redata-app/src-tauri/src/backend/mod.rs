@@ -6,7 +6,8 @@ pub mod infrastructure;
 pub mod presentation;
 
 use axum::Router;
-use std::sync::Arc;
+use infrastructure::config::init_logging;
+use std::net::SocketAddr;
 
 /// 应用状态
 pub struct AppState {
@@ -15,16 +16,34 @@ pub struct AppState {
 
 /// 创建后端应用
 pub async fn create_app() -> Router {
-    // 初始化基础设施层
-    let db = infrastructure::persistence::database::init_database().await
-        .expect("Failed to initialize database");
+    // 初始化日志
+    init_logging();
 
-    // 创建仓储实现
+    tracing::info!("Creating backend application");
+
+    // TODO: 初始化数据库
+    // let db = infrastructure::persistence::database::init_database().await
+    //     .expect("Failed to initialize database");
+
+    // TODO: 创建仓储实现
     // let project_repo = Arc::new(infrastructure::persistence::repositories::ProjectRepositoryImpl::new(db.clone()));
 
-    // 创建用例
+    // TODO: 创建用例
     // let create_project_use_case = Arc::new(application::use_cases::project::CreateProjectUseCase::new(project_repo));
 
     // 创建路由
-    presentation::api::create_routes()
+    presentation::create_routes()
+}
+
+/// 启动后端服务器
+pub async fn run_server(port: u16) -> Result<(), Box<dyn std::error::Error>> {
+    let app = create_app().await;
+    let addr = SocketAddr::from(([127, 0, 0, 1], port));
+
+    tracing::info!("Starting server on {}", addr);
+
+    let listener = tokio::net::TcpListener::bind(addr).await?;
+    axum::serve(listener, app).await?;
+
+    Ok(())
 }
