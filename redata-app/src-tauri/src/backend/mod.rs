@@ -6,13 +6,9 @@ pub mod infrastructure;
 pub mod presentation;
 
 use axum::Router;
-use infrastructure::config::init_logging;
-use std::net::SocketAddr;
-
-/// 应用状态
-pub struct AppState {
-    // 这里将存储依赖注入的服务
-}
+use infrastructure::{config::init_logging, persistence::init_database};
+use presentation::api::AppState;
+use std::{net::SocketAddr, sync::Arc};
 
 /// 创建后端应用
 pub async fn create_app() -> Router {
@@ -21,18 +17,16 @@ pub async fn create_app() -> Router {
 
     tracing::info!("Creating backend application");
 
-    // TODO: 初始化数据库
-    // let db = infrastructure::persistence::database::init_database().await
-    //     .expect("Failed to initialize database");
+    // 初始化数据库
+    let db = init_database().await.expect("Failed to initialize database");
 
-    // TODO: 创建仓储实现
-    // let project_repo = Arc::new(infrastructure::persistence::repositories::ProjectRepositoryImpl::new(db.clone()));
+    tracing::info!("Database initialized");
 
-    // TODO: 创建用例
-    // let create_project_use_case = Arc::new(application::use_cases::project::CreateProjectUseCase::new(project_repo));
+    // 创建应用状态
+    let state = AppState { db: Arc::new(db) };
 
     // 创建路由
-    presentation::create_routes()
+    presentation::create_routes().with_state(state)
 }
 
 /// 启动后端服务器

@@ -1,7 +1,9 @@
 // Tauri 应用库
-// 后端服务使用 Python + FastAPI 实现
 
-use std::process::{Command, Child};
+// 导出 Rust 后端模块
+pub mod backend;
+
+use std::process::{Child, Command};
 use std::sync::Mutex;
 
 // 全局变量存储后端进程

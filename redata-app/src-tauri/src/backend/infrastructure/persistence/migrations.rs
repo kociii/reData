@@ -1,0 +1,184 @@
+// 数据库迁移模块
+
+use sea_orm::{ConnectionTrait, DatabaseConnection, DbErr, Statement};
+
+/// 运行所有迁移
+pub async fn run_migrations(db: &DatabaseConnection) -> Result<(), DbErr> {
+    tracing::info!("Running database migrations");
+
+    // 创建 projects 表
+    create_projects_table(db).await?;
+
+    // 创建 project_fields 表
+    create_project_fields_table(db).await?;
+
+    // 创建 ai_configs 表
+    create_ai_configs_table(db).await?;
+
+    // 创建 processing_tasks 表
+    create_processing_tasks_table(db).await?;
+
+    // 创建 batches 表
+    create_batches_table(db).await?;
+
+    tracing::info!("Database migrations completed");
+
+    Ok(())
+}
+
+async fn create_projects_table(db: &DatabaseConnection) -> Result<(), DbErr> {
+    let sql = r#"
+        CREATE TABLE IF NOT EXISTS projects (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL UNIQUE,
+            description TEXT,
+            dedup_enabled BOOLEAN NOT NULL DEFAULT 1,
+            dedup_fields TEXT,
+            dedup_strategy TEXT NOT NULL DEFAULT 'skip',
+            created_at TEXT NOT NULL,
+            updated_at TEXT
+        )
+    "#;
+
+    db.execute(Statement::from_string(
+        db.get_database_backend(),
+        sql.to_string(),
+    ))
+    .await?;
+
+    tracing::debug!("Created projects table");
+    Ok(())
+}
+
+async fn create_project_fields_table(db: &DatabaseConnection) -> Result<(), DbErr> {
+    let sql = r#"
+        CREATE TABLE IF NOT EXISTS project_fields (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            project_id INTEGER NOT NULL,
+            field_name TEXT NOT NULL,
+            field_label TEXT NOT NULL,
+            field_type TEXT NOT NULL,
+            is_required BOOLEAN NOT NULL DEFAULT 0,
+            is_dedup_key BOOLEAN NOT NULL DEFAULT 0,
+            is_deleted BOOLEAN NOT NULL DEFAULT 0,
+            additional_requirement TEXT,
+            validation_rule TEXT,
+            extraction_hint TEXT,
+            display_order INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL,
+            deleted_at TEXT
+        )
+    "#;
+
+    db.execute(Statement::from_string(
+        db.get_database_backend(),
+        sql.to_string(),
+    ))
+    .await?;
+
+    // 创建索引
+    db.execute(Statement::from_string(
+        db.get_database_backend(),
+        "CREATE INDEX IF NOT EXISTS idx_project_fields_project_id ON project_fields(project_id)".to_string(),
+    ))
+    .await?;
+
+    tracing::debug!("Created project_fields table");
+    Ok(())
+}
+
+async fn create_ai_configs_table(db: &DatabaseConnection) -> Result<(), DbErr> {
+    let sql = r#"
+        CREATE TABLE IF NOT EXISTS ai_configs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL UNIQUE,
+            api_url TEXT NOT NULL,
+            model_name TEXT NOT NULL,
+            api_key TEXT NOT NULL,
+            temperature REAL NOT NULL DEFAULT 0.7,
+            max_tokens INTEGER NOT NULL DEFAULT 1000,
+            is_default BOOLEAN NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL,
+            updated_at TEXT
+        )
+    "#;
+
+    db.execute(Statement::from_string(
+        db.get_database_backend(),
+        sql.to_string(),
+    ))
+    .await?;
+
+    tracing::debug!("Created ai_configs table");
+    Ok(())
+}
+
+async fn create_processing_tasks_table(db: &DatabaseConnection) -> Result<(), DbErr> {
+    let sql = r#"
+        CREATE TABLE IF NOT EXISTS processing_tasks (
+            id TEXT PRIMARY KEY,
+            project_id INTEGER NOT NULL,
+            status TEXT NOT NULL,
+            total_files INTEGER NOT NULL DEFAULT 0,
+            processed_files INTEGER NOT NULL DEFAULT 0,
+            total_rows INTEGER NOT NULL DEFAULT 0,
+            processed_rows INTEGER NOT NULL DEFAULT 0,
+            success_count INTEGER NOT NULL DEFAULT 0,
+            error_count INTEGER NOT NULL DEFAULT 0,
+            batch_number TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT
+        )
+    "#;
+
+    db.execute(Statement::from_string(
+        db.get_database_backend(),
+        sql.to_string(),
+    ))
+    .await?;
+
+    // 创建索引
+    db.execute(Statement::from_string(
+        db.get_database_backend(),
+        "CREATE INDEX IF NOT EXISTS idx_processing_tasks_project_id ON processing_tasks(project_id)".to_string(),
+    ))
+    .await?;
+
+    db.execute(Statement::from_string(
+        db.get_database_backend(),
+        "CREATE INDEX IF NOT EXISTS idx_processing_tasks_status ON processing_tasks(status)".to_string(),
+    ))
+    .await?;
+
+    tracing::debug!("Created processing_tasks table");
+    Ok(())
+}
+
+async fn create_batches_table(db: &DatabaseConnection) -> Result<(), DbErr> {
+    let sql = r#"
+        CREATE TABLE IF NOT EXISTS batches (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            batch_number TEXT NOT NULL UNIQUE,
+            project_id INTEGER NOT NULL,
+            file_count INTEGER NOT NULL DEFAULT 0,
+            record_count INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL
+        )
+    "#;
+
+    db.execute(Statement::from_string(
+        db.get_database_backend(),
+        sql.to_string(),
+    ))
+    .await?;
+
+    // 创建索引
+    db.execute(Statement::from_string(
+        db.get_database_backend(),
+        "CREATE INDEX IF NOT EXISTS idx_batches_project_id ON batches(project_id)".to_string(),
+    ))
+    .await?;
+
+    tracing::debug!("Created batches table");
+    Ok(())
+}

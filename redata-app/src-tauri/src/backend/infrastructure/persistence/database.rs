@@ -52,6 +52,9 @@ pub async fn init_database_with_config(config: &DatabaseConfig) -> Result<Databa
 
     tracing::info!("Database connected successfully");
 
+    // 运行迁移
+    super::migrations::run_migrations(&db).await?;
+
     Ok(db)
 }
 

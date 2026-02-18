@@ -141,10 +141,16 @@ impl IntoResponse for AppError {
                 "Serialization failed".to_string(),
                 Some(e.to_string()),
             ),
-            AppError::Internal(msg) | AppError::Other(ref msg) => (
+            AppError::Internal(msg) => (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "INTERNAL_ERROR",
-                msg.to_string(),
+                msg,
+                None,
+            ),
+            AppError::Other(e) => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "INTERNAL_ERROR",
+                e.to_string(),
                 None,
             ),
         };

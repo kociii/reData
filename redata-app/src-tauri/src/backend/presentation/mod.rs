@@ -7,7 +7,7 @@ use axum::Router;
 use middleware::{create_cors_layer, create_trace_layer};
 
 /// 创建所有 API 路由
-pub fn create_routes() -> Router {
+pub fn create_routes() -> Router<api::AppState> {
     Router::new()
         .nest("/api", api::create_api_routes())
         .route("/health", axum::routing::get(health_check))
