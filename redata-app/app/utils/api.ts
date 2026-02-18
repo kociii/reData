@@ -455,7 +455,7 @@ export const batchesApi = {
 // ============ 结果 API ============
 
 export const resultsApi = {
-  query: (
+  query: async (
     projectId: number,
     params: {
       page?: number
@@ -465,47 +465,46 @@ export const resultsApi = {
       search?: string
     } = {}
   ) => {
-    const searchParams = new URLSearchParams()
-    if (params.page) searchParams.append('page', params.page.toString())
-    if (params.page_size) searchParams.append('page_size', params.page_size.toString())
-    if (params.batch_number) searchParams.append('batch_number', params.batch_number)
-    if (params.status) searchParams.append('status', params.status)
-    if (params.search) searchParams.append('search', params.search)
+    // 使用 Tauri Commands 查询记录
+    const response = await invoke<QueryRecordsResponse>('query_records', {
+      projectId,
+      page: params.page,
+      pageSize: params.page_size,
+      batchNumber: params.batch_number,
+      status: params.status,
+    })
 
-    return request<QueryResult>(
-      `/results/${projectId}?${searchParams.toString()}`
-    )
+    // 转换为 QueryResult 格式（保持向后兼容）
+    return {
+      records: response.records.map(r => ({
+        id: r.id,
+        ...r.data,
+        source_file: r.source_file,
+        source_sheet: r.source_sheet,
+        batch_number: r.batch_number,
+        status: r.status,
+      })),
+      total: response.total,
+      page: response.page,
+      page_size: response.page_size,
+    } as QueryResult
   },
 
-  update: (projectId: number, recordId: number, data: Record<string, any>) =>
-    request<void>(`/results/${projectId}/${recordId}`, {
-      method: 'PUT',
-      body: JSON.stringify(data),
-    }),
+  update: async (projectId: number, recordId: number, data: Record<string, any>) => {
+    return await invoke<ProjectRecord>('update_record', { id: recordId, data })
+  },
 
-  delete: (projectId: number, recordId: number) =>
-    request<void>(`/results/${projectId}/${recordId}`, {
-      method: 'DELETE',
-    }),
+  delete: async (projectId: number, recordId: number) => {
+    await invoke<void>('delete_record', { id: recordId })
+  },
 
   export: async (
     projectId: number,
     format: 'xlsx' | 'csv' = 'xlsx',
     batchNumber?: string
   ): Promise<Blob> => {
-    const params = new URLSearchParams()
-    params.append('format', format)
-    if (batchNumber) params.append('batch_number', batchNumber)
-
-    const response = await fetch(
-      `${API_BASE}/results/export/${projectId}?${params.toString()}`
-    )
-
-    if (!response.ok) {
-      throw new Error('Failed to export results')
-    }
-
-    return response.blob()
+    // TODO: 实现导出功能
+    throw new Error('导出功能尚未实现')
   },
 }
 

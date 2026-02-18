@@ -254,8 +254,13 @@ export const useProcessingStore = defineStore('processing', () => {
   function updateTaskStage(taskId: string, stageKey: string, status: ProcessingStage['status']) {
     const stages = taskStages.value.get(taskId)
     if (!stages) return
-    const stage = stages.find(s => s.key === stageKey)
-    if (stage) stage.status = status
+    const stageIndex = stages.findIndex(s => s.key === stageKey)
+    if (stageIndex !== -1) {
+      // 创建新数组以确保 Vue 响应式更新
+      const newStages = [...stages]
+      newStages[stageIndex] = { ...newStages[stageIndex], status }
+      taskStages.value.set(taskId, newStages)
+    }
   }
 
   function selectTask(taskId: string | null) {
@@ -281,7 +286,6 @@ export const useProcessingStore = defineStore('processing', () => {
           (existing.status === 'processing' || existing.status === 'paused')
         ) {
           tasks.value[index].status = task.status as any
-          disconnectWebSocket(taskId)
           addLog({
             time: new Date().toLocaleTimeString('zh-CN'),
             message: `任务状态已同步: ${task.status === 'completed' ? '已完成' : task.status}`,
@@ -340,6 +344,7 @@ export const useProcessingStore = defineStore('processing', () => {
   }
 
   function handleProgressEvent(data: ProcessingProgress) {
+    console.log('[Processing] Received event:', data.event, data.task_id)
     const taskId = data.task_id
     // 确保阶段已初始化
     if (taskId && !taskStages.value.has(taskId)) {
