@@ -1,7 +1,7 @@
 <template>
   <div class="w-full">
     <!-- 进度条 -->
-    <div class="relative h-2 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
+    <div class="relative h-2 bg-accented rounded-full overflow-hidden">
       <div
         class="absolute top-0 left-0 h-full transition-all duration-300 ease-out rounded-full"
         :class="progressBarClass"
@@ -11,7 +11,7 @@
 
     <!-- 进度信息 -->
     <div v-if="showInfo" class="flex justify-between items-center mt-2 text-sm">
-      <span class="text-gray-500 dark:text-gray-400">
+      <span class="text-muted">
         <template v-if="current !== undefined && total !== undefined">
           {{ current }} / {{ total }} {{ unit }}
         </template>
@@ -19,7 +19,7 @@
           {{ clampedProgress }}%
         </template>
       </span>
-      <span v-if="estimatedTime" class="text-gray-500 dark:text-gray-400">
+      <span v-if="estimatedTime" class="text-muted">
         预计剩余: {{ formatTime(estimatedTime) }}
       </span>
     </div>
@@ -58,10 +58,10 @@ const clampedProgress = computed(() => Math.min(100, Math.max(0, props.progress)
 
 // 进度条颜色
 const progressBarClass = computed(() => {
-  if (props.status === 'paused') return 'bg-yellow-500'
-  if (props.status === 'completed') return 'bg-green-500'
-  if (props.status === 'failed') return 'bg-red-500'
-  return 'bg-primary-500'
+  if (props.status === 'paused') return 'bg-warning'
+  if (props.status === 'completed') return 'bg-success'
+  if (props.status === 'failed') return 'bg-error'
+  return 'bg-primary'
 })
 
 // 状态图标
@@ -78,11 +78,11 @@ const statusIcon = computed(() => {
 const statusIconClass = computed(() => {
   const classes: Record<string, string> = {
     processing: 'w-4 h-4 text-primary animate-spin',
-    paused: 'w-4 h-4 text-yellow-500',
-    completed: 'w-4 h-4 text-green-500',
-    failed: 'w-4 h-4 text-red-500',
+    paused: 'w-4 h-4 text-warning',
+    completed: 'w-4 h-4 text-success',
+    failed: 'w-4 h-4 text-error',
   }
-  return classes[props.status || 'processing'] || 'w-4 h-4 text-gray-400'
+  return classes[props.status || 'processing'] || 'w-4 h-4 text-muted'
 })
 
 const statusText = computed(() => {
@@ -97,12 +97,12 @@ const statusText = computed(() => {
 
 const statusTextClass = computed(() => {
   const classes: Record<string, string> = {
-    processing: 'text-primary-600 dark:text-primary-400',
-    paused: 'text-yellow-600 dark:text-yellow-400',
-    completed: 'text-green-600 dark:text-green-400',
-    failed: 'text-red-600 dark:text-red-400',
+    processing: 'text-primary',
+    paused: 'text-warning',
+    completed: 'text-success',
+    failed: 'text-error',
   }
-  return classes[props.status || 'processing'] || 'text-gray-600'
+  return classes[props.status || 'processing'] || 'text-default'
 })
 
 // 格式化时间

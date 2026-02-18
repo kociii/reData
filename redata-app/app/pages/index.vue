@@ -3,20 +3,20 @@
     <!-- 后端连接错误提示 -->
     <div
       v-if="backendError"
-      class="bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-lg p-4"
+      class="bg-warning/10 border border-warning rounded-lg p-4"
     >
-      <div class="flex items-center gap-2 text-yellow-800 dark:text-yellow-200">
+      <div class="flex items-center gap-2 text-warning">
         <UIcon name="i-lucide-triangle-alert" class="w-5 h-5" />
         <span class="font-medium">后端服务器未连接</span>
       </div>
-      <p class="text-yellow-700 dark:text-yellow-300 text-sm mt-2">
-        请先启动后端服务器：在 backend 目录下运行 <code class="bg-yellow-100 dark:bg-yellow-900 px-1 rounded">uv run python run.py</code>
+      <p class="text-default text-sm mt-2">
+        请先启动后端服务器：在 backend 目录下运行 <code class="bg-accented px-1 rounded">uv run python run.py</code>
       </p>
     </div>
 
     <!-- 页面标题 + 工具栏 -->
     <div class="flex justify-between items-center">
-      <h2 class="text-lg font-semibold text-gray-900 dark:text-white">我的项目</h2>
+      <h2 class="text-lg font-semibold text-highlighted">我的项目</h2>
       <UButton icon="i-lucide-plus" size="sm" @click="showCreateModal = true">
         新建项目
       </UButton>
@@ -26,18 +26,18 @@
     <div v-if="projectStore.loading && !backendError" class="flex justify-center py-12">
       <div class="text-center">
         <UIcon name="i-lucide-refresh-cw" class="w-8 h-8 animate-spin text-primary mx-auto" />
-        <p class="text-gray-500 dark:text-gray-400 mt-2">加载项目中...</p>
+        <p class="text-muted mt-2">加载项目中...</p>
       </div>
     </div>
 
     <!-- 空状态 -->
     <div
       v-else-if="!projectStore.hasProjects && !backendError"
-      class="text-center py-16 bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700"
+      class="text-center py-16 bg-elevated rounded-lg border border-default"
     >
-      <UIcon name="i-lucide-folder-open" class="w-16 h-16 mx-auto text-gray-300 dark:text-gray-600 mb-4" />
-      <h3 class="text-lg font-medium text-gray-900 dark:text-white mb-2">还没有任何项目</h3>
-      <p class="text-sm text-gray-500 dark:text-gray-400 mb-6">创建第一个项目开始使用 reData</p>
+      <UIcon name="i-lucide-folder-open" class="w-16 h-16 mx-auto text-dimmed mb-4" />
+      <h3 class="text-lg font-medium text-highlighted mb-2">还没有任何项目</h3>
+      <p class="text-sm text-muted mb-6">创建第一个项目开始使用 reData</p>
       <UButton icon="i-lucide-plus" @click="showCreateModal = true">新建项目</UButton>
     </div>
 
@@ -46,14 +46,14 @@
       <div
         v-for="project in projectStore.projects"
         :key="project.id"
-        class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 hover:border-primary-300 dark:hover:border-primary-600 hover:shadow-md transition-all cursor-pointer"
+        class="bg-elevated rounded-lg border border-default hover:border-primary hover:shadow-md transition-all cursor-pointer"
         @click="openProject(project)"
       >
         <div class="px-4 py-4">
           <div class="flex items-start justify-between gap-2">
             <div class="flex items-center gap-2 min-w-0">
-              <UIcon name="i-lucide-folder" class="w-5 h-5 text-primary-500 flex-shrink-0" />
-              <h3 class="text-base font-medium text-gray-900 dark:text-white truncate">{{ project.name }}</h3>
+              <UIcon name="i-lucide-folder" class="w-5 h-5 text-primary flex-shrink-0" />
+              <h3 class="text-base font-medium text-highlighted truncate">{{ project.name }}</h3>
             </div>
             <UDropdownMenu :items="getProjectMenuItems(project)" :ui="{ content: 'w-36' }">
               <UButton
@@ -65,18 +65,18 @@
               />
             </UDropdownMenu>
           </div>
-          <p class="text-sm text-gray-500 dark:text-gray-400 line-clamp-2 mt-2">{{ project.description || '暂无描述' }}</p>
+          <p class="text-sm text-muted line-clamp-2 mt-2">{{ project.description || '暂无描述' }}</p>
         </div>
       </div>
 
       <!-- 新建项目卡片 -->
       <div
-        class="border-2 border-dashed border-gray-200 dark:border-gray-700 rounded-lg flex items-center justify-center py-8 cursor-pointer hover:border-primary-300 dark:hover:border-primary-600 hover:bg-primary-50/50 dark:hover:bg-primary-900/10 transition-colors"
+        class="border-2 border-dashed border-default rounded-lg flex items-center justify-center py-8 cursor-pointer hover:border-primary hover:bg-accented transition-colors"
         @click="showCreateModal = true"
       >
         <div class="flex items-center gap-2">
-          <UIcon name="i-lucide-plus" class="w-5 h-5 text-gray-400" />
-          <span class="text-sm text-gray-500 dark:text-gray-400">新建项目</span>
+          <UIcon name="i-lucide-plus" class="w-5 h-5 text-muted" />
+          <span class="text-sm text-muted">新建项目</span>
         </div>
       </div>
     </div>
@@ -91,7 +91,7 @@
           <UFormField label="项目描述" name="description">
             <UTextarea v-model="form.description" placeholder="可选的项目描述" :rows="3" />
           </UFormField>
-          <p class="text-sm text-gray-500 dark:text-gray-400">
+          <p class="text-sm text-muted">
             去重配置可在字段定义中设置（每个字段可单独设置是否参与去重）
           </p>
         </UForm>
@@ -107,7 +107,7 @@
     <!-- 删除确认对话框 -->
     <UModal v-model:open="showDeleteModal" title="确认删除">
       <template #body>
-        <p class="text-gray-600 dark:text-gray-400">确定要删除项目 "{{ projectToDelete?.name }}" 吗？此操作无法撤销，所有数据将被永久删除。</p>
+        <p class="text-default">确定要删除项目 "{{ projectToDelete?.name }}" 吗？此操作无法撤销，所有数据将被永久删除。</p>
       </template>
       <template #footer>
         <div class="flex justify-end gap-2">

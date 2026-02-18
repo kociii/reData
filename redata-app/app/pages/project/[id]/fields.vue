@@ -2,7 +2,7 @@
   <div class="py-4">
     <!-- 工具栏 -->
     <div class="flex justify-between items-center mb-4">
-      <div class="text-sm text-gray-500 dark:text-gray-400">
+      <div class="text-sm text-muted">
         共 {{ fieldStore.fieldCount }} 个字段
       </div>
       <UButton icon="i-lucide-plus" @click="openFieldModal()">
@@ -13,66 +13,66 @@
     <!-- 空状态 -->
     <div
       v-if="!fieldStore.loading && fieldStore.fieldCount === 0"
-      class="text-center py-12 bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700"
+      class="text-center py-12 bg-elevated rounded-lg border border-default"
     >
-      <UIcon name="i-lucide-table-2" class="w-12 h-12 mx-auto text-gray-400 mb-4" />
-      <h3 class="text-lg font-medium text-gray-900 dark:text-white mb-2">还没有字段定义</h3>
-      <p class="text-gray-500 dark:text-gray-400 mb-6">添加字段定义后，系统将根据这些字段提取数据</p>
+      <UIcon name="i-lucide-table-2" class="w-12 h-12 mx-auto text-dimmed mb-4" />
+      <h3 class="text-lg font-medium text-highlighted mb-2">还没有字段定义</h3>
+      <p class="text-muted mb-6">添加字段定义后，系统将根据这些字段提取数据</p>
       <UButton icon="i-lucide-plus" @click="openFieldModal()">
         添加字段
       </UButton>
     </div>
 
     <!-- 字段表格 -->
-    <div v-else class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden">
-      <table class="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
-        <thead class="bg-gray-50 dark:bg-gray-900">
+    <div v-else class="bg-elevated rounded-lg border border-default overflow-hidden">
+      <table class="min-w-full divide-y divide-default">
+        <thead class="bg-muted">
           <tr>
-            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider w-12">
+            <th class="px-4 py-3 text-left text-xs font-medium text-muted uppercase tracking-wider w-12">
               必填
             </th>
-            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider w-12">
+            <th class="px-4 py-3 text-left text-xs font-medium text-muted uppercase tracking-wider w-12">
               去重
             </th>
-            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+            <th class="px-4 py-3 text-left text-xs font-medium text-muted uppercase tracking-wider">
               字段名称
             </th>
-            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+            <th class="px-4 py-3 text-left text-xs font-medium text-muted uppercase tracking-wider">
               字段类型
             </th>
-            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+            <th class="px-4 py-3 text-left text-xs font-medium text-muted uppercase tracking-wider">
               字段英文名
             </th>
-            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+            <th class="px-4 py-3 text-left text-xs font-medium text-muted uppercase tracking-wider">
               验证规则
             </th>
-            <th class="px-4 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider w-24">
+            <th class="px-4 py-3 text-right text-xs font-medium text-muted uppercase tracking-wider w-24">
               操作
             </th>
           </tr>
         </thead>
-        <tbody class="divide-y divide-gray-200 dark:divide-gray-700">
+        <tbody class="divide-y divide-default">
           <tr
             v-for="field in fieldStore.fields"
             :key="field.id"
-            class="hover:bg-gray-50 dark:hover:bg-gray-900"
+            class="hover:bg-muted"
           >
             <td class="px-4 py-3 text-center">
-              <UIcon v-if="field.is_required" name="i-lucide-check" class="w-4 h-4 text-green-600" />
+              <UIcon v-if="field.is_required" name="i-lucide-check" class="w-4 h-4 text-success" />
             </td>
             <td class="px-4 py-3 text-center">
-              <UIcon v-if="field.is_dedup_key" name="i-lucide-fingerprint" class="w-4 h-4 text-primary-600" />
+              <UIcon v-if="field.is_dedup_key" name="i-lucide-fingerprint" class="w-4 h-4 text-primary" />
             </td>
-            <td class="px-4 py-3 text-sm text-gray-900 dark:text-white">
+            <td class="px-4 py-3 text-sm text-highlighted">
               {{ field.field_label }}
             </td>
-            <td class="px-4 py-3 text-sm text-gray-600 dark:text-gray-400">
+            <td class="px-4 py-3 text-sm text-default">
               {{ getFieldTypeLabel(field.field_type) }}
             </td>
-            <td class="px-4 py-3 text-sm font-mono text-gray-600 dark:text-gray-400">
+            <td class="px-4 py-3 text-sm font-mono text-default">
               {{ field.field_name }}
             </td>
-            <td class="px-4 py-3 text-sm text-gray-600 dark:text-gray-400">
+            <td class="px-4 py-3 text-sm text-default">
               {{ field.validation_rule || '-' }}
             </td>
             <td class="px-4 py-3 text-right">
@@ -114,16 +114,16 @@
 
           <USwitch v-model="fieldForm.is_dedup_key" label="参与去重" />
 
-          <div v-if="editingField" class="pt-4 border-t border-gray-200 dark:border-gray-700 space-y-3">
-            <div class="text-sm font-medium text-gray-700 dark:text-gray-300">AI 生成的字段信息</div>
+          <div v-if="editingField" class="pt-4 border-t border-default space-y-3">
+            <div class="text-sm font-medium text-default">AI 生成的字段信息</div>
             <div class="space-y-2 text-sm">
               <div class="flex justify-between">
-                <span class="text-gray-500 dark:text-gray-400">字段名:</span>
-                <span class="font-mono text-gray-900 dark:text-white">{{ editingField.field_name }}</span>
+                <span class="text-muted">字段名:</span>
+                <span class="font-mono text-highlighted">{{ editingField.field_name }}</span>
               </div>
               <div class="flex justify-between">
-                <span class="text-gray-500 dark:text-gray-400">验证规则:</span>
-                <span class="text-gray-900 dark:text-white">{{ editingField.validation_rule || '无' }}</span>
+                <span class="text-muted">验证规则:</span>
+                <span class="text-highlighted">{{ editingField.validation_rule || '无' }}</span>
               </div>
             </div>
           </div>
@@ -145,7 +145,7 @@
     <!-- 删除确认对话框 -->
     <UModal v-model:open="showDeleteModal" title="确认删除">
       <template #body>
-        <p class="text-gray-600 dark:text-gray-400">
+        <p class="text-default">
           确定要删除字段 "{{ fieldToDelete?.field_label }}" 吗？此操作无法撤销。
         </p>
       </template>

@@ -39,32 +39,32 @@ defineProps<{
 function nodeClass(status: ProcessingStage['status']) {
   switch (status) {
     case 'completed':
-      return 'bg-green-500 border-green-500 text-white'
+      return 'bg-success border-success text-inverted'
     case 'active':
-      return 'bg-primary border-primary text-white'
+      return 'bg-primary border-primary text-inverted'
     case 'error':
-      return 'bg-red-500 border-red-500 text-white'
+      return 'bg-error border-error text-inverted'
     default:
-      return 'bg-transparent border-gray-300 dark:border-gray-600 text-gray-400 dark:text-gray-500'
+      return 'bg-transparent border-default text-muted'
   }
 }
 
 function labelClass(status: ProcessingStage['status']) {
   switch (status) {
     case 'completed':
-      return 'text-green-600 dark:text-green-400 font-medium'
+      return 'text-success font-medium'
     case 'active':
       return 'text-primary font-medium'
     case 'error':
-      return 'text-red-600 dark:text-red-400 font-medium'
+      return 'text-error font-medium'
     default:
-      return 'text-gray-400 dark:text-gray-500'
+      return 'text-muted'
   }
 }
 
 function lineClass(status: ProcessingStage['status']) {
   return status === 'completed'
-    ? 'bg-green-500'
-    : 'bg-gray-300 dark:bg-gray-600'
+    ? 'bg-success'
+    : 'bg-default'
 }
 </script>

@@ -2,14 +2,14 @@
   <div>
     <!-- 页面标题 -->
     <div class="mb-6">
-      <h1 class="text-2xl font-bold text-gray-900 dark:text-white">设置</h1>
-      <p class="text-gray-500 dark:text-gray-400 mt-1">配置 AI 模型和应用设置</p>
+      <h1 class="text-2xl font-bold text-highlighted">设置</h1>
+      <p class="text-muted mt-1">配置 AI 模型和应用设置</p>
     </div>
 
     <!-- AI 配置 -->
-    <div class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 mb-6">
-      <div class="flex justify-between items-center px-4 py-3 border-b border-gray-200 dark:border-gray-700">
-        <h2 class="text-lg font-medium text-gray-900 dark:text-white">AI 配置</h2>
+    <div class="bg-elevated rounded-lg border border-default mb-6">
+      <div class="flex justify-between items-center px-4 py-3 border-b border-default">
+        <h2 class="text-lg font-medium text-highlighted">AI 配置</h2>
         <UButton icon="i-lucide-plus" size="sm" @click="showCreateModal = true">
           添加配置
         </UButton>
@@ -25,30 +25,30 @@
         v-else-if="!configStore.hasConfig"
         class="text-center py-12"
       >
-        <UIcon name="i-lucide-cpu" class="w-12 h-12 mx-auto text-gray-400 mb-4" />
-        <h3 class="text-lg font-medium text-gray-900 dark:text-white mb-2">还没有 AI 配置</h3>
-        <p class="text-gray-500 dark:text-gray-400 mb-4">添加 AI 配置以启用数据提取功能</p>
+        <UIcon name="i-lucide-cpu" class="w-12 h-12 mx-auto text-dimmed mb-4" />
+        <h3 class="text-lg font-medium text-highlighted mb-2">还没有 AI 配置</h3>
+        <p class="text-muted mb-4">添加 AI 配置以启用数据提取功能</p>
         <UButton icon="i-lucide-plus" @click="showCreateModal = true">
           添加配置
         </UButton>
       </div>
 
       <!-- 配置列表 -->
-      <div v-else class="divide-y divide-gray-200 dark:divide-gray-700">
+      <div v-else class="divide-y divide-default">
         <div
           v-for="config in configStore.configs"
           :key="config.id"
-          class="flex items-center justify-between px-4 py-3 hover:bg-gray-50 dark:hover:bg-gray-900"
+          class="flex items-center justify-between px-4 py-3 hover:bg-muted"
         >
           <div class="flex items-center gap-3">
             <div>
               <div class="flex items-center gap-2">
-                <span class="font-medium text-gray-900 dark:text-white">{{ config.name }}</span>
+                <span class="font-medium text-highlighted">{{ config.name }}</span>
                 <UBadge v-if="config.is_default" color="success" variant="subtle" size="xs">
                   默认
                 </UBadge>
               </div>
-              <div class="text-sm text-gray-500 dark:text-gray-400">
+              <div class="text-sm text-muted">
                 {{ config.model_name }} · {{ config.api_url || '默认端点' }}
               </div>
             </div>
@@ -96,41 +96,104 @@
     </div>
 
     <!-- 应用设置 -->
-    <div class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700">
-      <div class="px-4 py-3 border-b border-gray-200 dark:border-gray-700">
-        <h2 class="text-lg font-medium text-gray-900 dark:text-white">应用设置</h2>
+    <div class="bg-elevated rounded-lg border border-default">
+      <div class="px-4 py-3 border-b border-default flex items-center justify-between">
+        <h2 class="text-lg font-medium text-highlighted">应用设置</h2>
+        <UButton
+          v-if="hasChanges"
+          icon="i-lucide-rotate-ccw"
+          color="neutral"
+          variant="ghost"
+          size="xs"
+          @click="resetToDefault"
+        >
+          重置默认
+        </UButton>
       </div>
       <div class="p-4 space-y-4">
+        <!-- 主题设置 -->
         <div class="flex items-center justify-between">
           <div>
-            <div class="font-medium text-gray-900 dark:text-white">深色模式</div>
-            <div class="text-sm text-gray-500 dark:text-gray-400">切换应用主题</div>
+            <div class="font-medium text-highlighted">主题设置</div>
+            <div class="text-sm text-muted">选择应用外观主题</div>
           </div>
-          <ColorModeButton />
+          <div class="flex items-center gap-2">
+            <UButton
+              v-for="option in themeOptions"
+              :key="option.value"
+              :color="globalSettings.settings.theme === option.value ? 'primary' : 'neutral'"
+              :variant="globalSettings.settings.theme === option.value ? 'solid' : 'ghost'"
+              size="xs"
+              @click="globalSettings.updateSetting('theme', option.value)"
+            >
+              {{ option.label }}
+            </UButton>
+          </div>
         </div>
 
         <USeparator />
 
+        <!-- 并行处理数 -->
         <div class="flex items-center justify-between">
           <div>
-            <div class="font-medium text-gray-900 dark:text-white">并行处理数</div>
-            <div class="text-sm text-gray-500 dark:text-gray-400">同时处理的文件数量</div>
+            <div class="font-medium text-highlighted">并行处理数</div>
+            <div class="text-sm text-muted">同时处理的文件数量（1-10）</div>
           </div>
-          <UInput
-            v-model="appSettings.parallelCount"
-            type="number"
-            min="1"
-            max="10"
-            class="w-24"
+          <div class="flex items-center gap-2">
+            <UButton
+              icon="i-lucide-minus"
+              color="neutral"
+              variant="ghost"
+              size="xs"
+              :disabled="globalSettings.settings.parallelCount <= 1"
+              @click="globalSettings.updateSetting('parallelCount', globalSettings.settings.parallelCount - 1)"
+            />
+            <span class="w-8 text-center font-medium">{{ globalSettings.settings.parallelCount }}</span>
+            <UButton
+              icon="i-lucide-plus"
+              color="neutral"
+              variant="ghost"
+              size="xs"
+              :disabled="globalSettings.settings.parallelCount >= 10"
+              @click="globalSettings.updateSetting('parallelCount', globalSettings.settings.parallelCount + 1)"
+            />
+          </div>
+        </div>
+
+        <USeparator />
+
+        <!-- 自动保存 -->
+        <div class="flex items-center justify-between">
+          <div>
+            <div class="font-medium text-highlighted">自动保存</div>
+            <div class="text-sm text-muted">处理完成后自动保存结果</div>
+          </div>
+          <UToggle
+            :model-value="globalSettings.settings.autoSave"
+            @update:model-value="globalSettings.updateSetting('autoSave', $event)"
           />
         </div>
 
+        <USeparator />
+
+        <!-- 重复数据处理策略 -->
         <div class="flex items-center justify-between">
           <div>
-            <div class="font-medium text-gray-900 dark:text-white">自动保存</div>
-            <div class="text-sm text-gray-500 dark:text-gray-400">处理完成后自动保存结果</div>
+            <div class="font-medium text-highlighted">重复数据处理</div>
+            <div class="text-sm text-muted">当检测到重复记录时的处理方式</div>
           </div>
-          <UToggle v-model="appSettings.autoSave" />
+          <div class="flex items-center gap-2">
+            <UButton
+              v-for="option in duplicateOptions"
+              :key="option.value"
+              :color="globalSettings.settings.duplicateStrategy === option.value ? 'primary' : 'neutral'"
+              :variant="globalSettings.settings.duplicateStrategy === option.value ? 'solid' : 'ghost'"
+              size="xs"
+              @click="globalSettings.updateSetting('duplicateStrategy', option.value)"
+            >
+              {{ option.label }}
+            </UButton>
+          </div>
         </div>
       </div>
     </div>
@@ -174,7 +237,7 @@
     <!-- 删除确认对话框 -->
     <UModal v-model:open="showDeleteModal" title="确认删除">
       <template #body>
-        <p class="text-gray-600 dark:text-gray-400">
+        <p class="text-default">
           确定要删除配置 "{{ configToDelete?.name }}" 吗？此操作无法撤销。
         </p>
       </template>
@@ -193,8 +256,9 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onMounted } from 'vue'
+import { ref, reactive, computed, onMounted } from 'vue'
 import { useConfigStore } from '~/stores/config'
+import { useGlobalSettingsStore } from '~/stores/globalSettings'
 import type { AiConfig } from '~/types'
 
 definePageMeta({
@@ -203,12 +267,37 @@ definePageMeta({
 
 const toast = useToast()
 const configStore = useConfigStore()
+const globalSettings = useGlobalSettingsStore()
 
-// 应用设置
-const appSettings = reactive({
-  parallelCount: 3,
-  autoSave: true,
+// 主题选项
+const themeOptions = [
+  { value: 'light' as const, label: '浅色' },
+  { value: 'dark' as const, label: '深色' },
+  { value: 'system' as const, label: '跟随系统' },
+]
+
+// 重复数据处理选项
+const duplicateOptions = [
+  { value: 'skip' as const, label: '跳过' },
+  { value: 'update' as const, label: '更新' },
+  { value: 'merge' as const, label: '合并' },
+]
+
+// 是否有修改
+const hasChanges = computed(() => {
+  return (
+    globalSettings.settings.parallelCount !== 3 ||
+    globalSettings.settings.theme !== 'system' ||
+    globalSettings.settings.autoSave !== true ||
+    globalSettings.settings.duplicateStrategy !== 'skip'
+  )
 })
+
+// 重置为默认
+async function resetToDefault() {
+  await globalSettings.resetSettings()
+  toast.add({ title: '已重置为默认设置', color: 'success' })
+}
 
 // 配置表单
 const showCreateModal = ref(false)
@@ -351,7 +440,8 @@ async function deleteConfig() {
   }
 }
 
-onMounted(() => {
+onMounted(async () => {
   configStore.fetchConfigs()
+  await globalSettings.loadSettings()
 })
 </script>

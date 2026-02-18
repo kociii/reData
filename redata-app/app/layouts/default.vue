@@ -1,12 +1,12 @@
 <template>
-  <div class="min-h-screen flex flex-col bg-gray-50 dark:bg-gray-900">
+  <div class="min-h-screen flex flex-col bg-muted">
     <!-- 顶部标题栏 -->
-    <header class="bg-white dark:bg-gray-800 shadow-sm border-b border-gray-200 dark:border-gray-700 flex-shrink-0">
+    <header class="bg-elevated shadow-sm border-b border-default flex-shrink-0">
       <div class="px-6 h-14 flex items-center justify-between">
         <!-- 左侧：Logo + 标题 -->
         <div class="flex items-center gap-2">
           <img src="/logo.png" alt="reData Logo" class="w-8 h-8 rounded-lg" />
-          <span class="text-lg font-bold text-gray-900 dark:text-white">reData</span>
+          <span class="text-lg font-bold text-highlighted">reData</span>
         </div>
 
         <!-- 右侧：操作按钮 -->
@@ -18,21 +18,21 @@
             size="sm"
             @click="openSettingsTab"
           />
-          <ColorModeButton />
+          <UColorModeButton />
         </div>
       </div>
     </header>
 
     <!-- 全局标签栏 -->
-    <nav class="bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 flex-shrink-0">
+    <nav class="bg-elevated border-b border-default flex-shrink-0">
       <div class="px-4 flex items-end gap-0.5 overflow-x-auto">
         <div
           v-for="tab in tabStore.tabs"
           :key="tab.id"
           class="group flex items-center gap-1.5 px-4 h-9 text-sm cursor-pointer border-b-2 transition-colors select-none flex-shrink-0"
           :class="tab.id === tabStore.activeTabId
-            ? 'border-primary-500 text-primary-600 dark:text-primary-400 bg-primary-50 dark:bg-primary-900/20'
-            : 'border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700/50'"
+            ? 'border-primary-500 text-primary bg-accented'
+            : 'border-transparent text-muted hover:text-default hover:bg-accented'"
           @click="switchTab(tab)"
         >
           <UIcon
@@ -42,7 +42,7 @@
           <span class="truncate max-w-32">{{ tab.label }}</span>
           <button
             v-if="tab.closable"
-            class="ml-1 p-0.5 rounded hover:bg-gray-200 dark:hover:bg-gray-600 opacity-0 group-hover:opacity-100 transition-opacity"
+            class="ml-1 p-0.5 rounded hover:bg-accented opacity-0 group-hover:opacity-100 transition-opacity"
             @click.stop="closeTab(tab.id)"
           >
             <UIcon name="i-lucide-x" class="w-3 h-3" />
@@ -52,14 +52,14 @@
     </nav>
 
     <!-- 项目子导航栏（仅项目标签激活时显示） -->
-    <nav v-if="isProjectPage" class="bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 flex-shrink-0">
+    <nav v-if="isProjectPage" class="bg-elevated border-b border-default flex-shrink-0">
       <div class="px-6 flex gap-1">
         <NuxtLink
           :to="`/project/${projectId}/results`"
           class="px-4 py-2.5 text-sm font-medium transition-colors"
           :class="isResultsTab
-            ? 'text-primary-600 dark:text-primary-400 border-b-2 border-primary-600 dark:border-primary-400'
-            : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white'"
+            ? 'text-primary border-b-2 border-primary'
+            : 'text-muted hover:text-default'"
         >
           数据结果
         </NuxtLink>
@@ -67,8 +67,8 @@
           :to="`/project/${projectId}/processing`"
           class="px-4 py-2.5 text-sm font-medium transition-colors"
           :class="isProcessingTab
-            ? 'text-primary-600 dark:text-primary-400 border-b-2 border-primary-600 dark:border-primary-400'
-            : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white'"
+            ? 'text-primary border-b-2 border-primary'
+            : 'text-muted hover:text-default'"
         >
           数据处理
         </NuxtLink>
@@ -76,8 +76,8 @@
           :to="`/project/${projectId}/fields`"
           class="px-4 py-2.5 text-sm font-medium transition-colors"
           :class="isFieldsTab
-            ? 'text-primary-600 dark:text-primary-400 border-b-2 border-primary-600 dark:border-primary-400'
-            : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white'"
+            ? 'text-primary border-b-2 border-primary'
+            : 'text-muted hover:text-default'"
         >
           字段定义
         </NuxtLink>
@@ -85,8 +85,8 @@
           :to="`/project/${projectId}/settings`"
           class="px-4 py-2.5 text-sm font-medium transition-colors"
           :class="isSettingsTab
-            ? 'text-primary-600 dark:text-primary-400 border-b-2 border-primary-600 dark:border-primary-400'
-            : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white'"
+            ? 'text-primary border-b-2 border-primary'
+            : 'text-muted hover:text-default'"
         >
           项目设置
         </NuxtLink>
@@ -99,8 +99,8 @@
     </main>
 
     <!-- 底部状态栏 -->
-    <footer class="bg-white dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700 flex-shrink-0">
-      <div class="px-6 h-7 flex items-center justify-between text-xs text-gray-500 dark:text-gray-400">
+    <footer class="bg-elevated border-t border-default flex-shrink-0">
+      <div class="px-6 h-7 flex items-center justify-between text-xs text-muted">
         <div class="flex items-center gap-4">
           <template v-if="!isProjectPage">
             <span>共 {{ projectStore.projectCount }} 个项目</span>
