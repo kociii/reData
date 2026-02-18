@@ -382,6 +382,55 @@ unlistenProgress = await processingApi.onProgress((data) => {
 - `row_processed` - 行处理进度（每 10 行节流）
 - `completed` / `error` / `warning` - 任务状态
 
+### JSON 统一存储数据访问 (v2.6.0)
+
+**数据结构**：
+- 数据库 `data` 列以 `field_id` 为 key 存储 JSON（如 `{"3": "张三", "5": "13800138000"}`）
+- Rust 后端返回 `RecordResponse.data` 为解析后的 `JsonValue` 对象
+
+**前端数据转换**（`api.ts` resultsApi.query）：
+```typescript
+// 响应结构：{ id, data: {"3": "张三"}, source_file, ... }
+records: response.records.map(r => ({
+  id: r.id,
+  ...r.data,  // 展开到根级别：{ id, "3": "张三", source_file, ... }
+  source_file: r.source_file,
+}))
+```
+
+**Vue 模板访问**：
+```vue
+<!-- 正确：数据已展开到根级别，用 field.id 作为 key -->
+{{ record[field.id] || '-' }}
+
+<!-- 错误：data 已展开，不再是独立属性 -->
+{{ record.data?.[field.id] }}  <!-- ❌ -->
+```
+
+**关键点**：
+- `field.id` 是数字，但 JSON key 是字符串，JavaScript 会自动转换
+- Vue 模板中 `record[field.id]` 等价于 `record[String(field.id)]`
+
+### Vue 响应式更新问题 (v2.6.0)
+
+**问题**：进度条卡在"准备中"阶段不更新
+
+**原因**：`taskStages` 是 `Map<string, ProcessingStage[]>`，直接修改数组元素不触发 Vue 响应式更新
+
+**错误做法**：
+```typescript
+const stage = stages.find(s => s.key === stageKey)
+if (stage) stage.status = status  // ❌ 不会触发更新
+```
+
+**正确做法**：
+```typescript
+// 创建新数组替换，触发响应式更新
+const newStages = [...stages]
+newStages[stageIndex] = { ...newStages[stageIndex], status }
+taskStages.value.set(taskId, newStages)  // ✅
+```
+
 ## 开发进度
 
 **v2.6.0（当前版本）**：
