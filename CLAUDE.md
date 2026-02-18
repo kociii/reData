@@ -431,6 +431,43 @@ newStages[stageIndex] = { ...newStages[stageIndex], status }
 taskStages.value.set(taskId, newStages)  // ✅
 ```
 
+### 数据清理机制 (v2.6.0)
+
+Excel 数据经常包含非标准格式（换行、多余空格等），导入前需进行清理。
+
+**清理函数**（`processing.rs` → `clean_value`）：
+
+```rust
+fn clean_value(value: &str, field_type: &str) -> String
+```
+
+**清理规则**：
+
+| 字段类型 | 清理规则 |
+|---------|---------|
+| `phone` | 仅保留数字和 `+` 号 |
+| `email` | 去除所有空格、换行，转小写 |
+| `number` / `id_card` | 仅保留数字和字母 |
+| `date` | 仅保留数字和日期分隔符（`-/.:`）|
+| 其他 | 压缩连续空白为单个空格 |
+
+**通用清理**（所有类型）：
+- 换行符 `\r\n`、制表符 `\t` → 空格
+- 其他控制字符 → 空格
+- 首尾空白 → 去除
+
+**示例**：
+```
+输入: "  138 0013\n8000  "  (phone)
+输出: "13800138000"
+
+输入: "  Test@Example.com\n  "  (email)
+输出: "test@example.com"
+
+输入: "北京市\n朝阳区  "  (text)
+输出: "北京市 朝阳区"
+```
+
 ## 开发进度
 
 **v2.6.0（当前版本）**：

@@ -115,6 +115,75 @@ fn validate_value(value: &str, validation_rule: Option<&str>) -> bool {
     true
 }
 
+/// 根据字段类型清理数据值
+///
+/// 清理规则：
+/// - 通用：去除首尾空格、换行符、制表符
+/// - phone: 仅保留数字和 + 号
+/// - email: 去除空格、换行，转小写
+/// - text/其他: 压缩连续空白为单个空格
+fn clean_value(value: &str, field_type: &str) -> String {
+    // 第一步：通用清理 - 去除首尾空白和控制字符
+    let mut cleaned = value
+        .chars()
+        .map(|c| match c {
+            '\r' | '\n' | '\t' => ' ',  // 换行、制表符转为空格
+            c if c.is_control() => ' ', // 其他控制字符转为空格
+            c => c,
+        })
+        .collect::<String>();
+
+    // 根据字段类型进行特定清理
+    match field_type {
+        "phone" => {
+            // 手机号：仅保留数字和 + 号
+            cleaned = cleaned
+                .chars()
+                .filter(|c| c.is_ascii_digit() || *c == '+')
+                .collect();
+        }
+        "email" => {
+            // 邮箱：去除所有空格，转小写
+            cleaned = cleaned.chars().filter(|c| !c.is_whitespace()).collect();
+            cleaned = cleaned.to_lowercase();
+        }
+        "number" | "id_card" => {
+            // 数字、身份证：仅保留数字和字母
+            cleaned = cleaned
+                .chars()
+                .filter(|c| c.is_ascii_alphanumeric())
+                .collect();
+        }
+        "date" => {
+            // 日期：去除空格，保留数字、日期分隔符
+            cleaned = cleaned
+                .chars()
+                .filter(|c| c.is_ascii_digit() || matches!(c, '-' | '/' | '.' | ':'))
+                .collect();
+        }
+        _ => {
+            // 默认文本类型：压缩连续空白为单个空格
+            let mut result = String::new();
+            let mut prev_space = false;
+            for c in cleaned.chars() {
+                if c.is_whitespace() {
+                    if !prev_space {
+                        result.push(' ');
+                        prev_space = true;
+                    }
+                } else {
+                    result.push(c);
+                    prev_space = false;
+                }
+            }
+            cleaned = result;
+        }
+    }
+
+    // 最后再次 trim
+    cleaned.trim().to_string()
+}
+
 // ============ Tauri Commands ============
 
 /// 开始处理文件
@@ -580,7 +649,8 @@ async fn process_single_file(
                 if let Some(field) = fields.iter().find(|f| f.field_name == mapping.field_name) {
                     let col_idx = mapping.column_index as usize;
                     if col_idx < row.len() {
-                        let value = row[col_idx].trim().to_string();
+                        // 根据字段类型清理数据
+                        let value = clean_value(&row[col_idx], &field.field_type);
 
                         // 验证
                         let rule = field.validation_rule.as_deref();
