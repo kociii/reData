@@ -34,8 +34,6 @@ import type {
 // 使用 Tauri Commands 模式（零网络开销）
 const USE_TAURI_COMMANDS = true
 
-console.log(`Using ${USE_TAURI_COMMANDS ? 'Tauri Commands' : 'HTTP API'} backend`)
-
 // 通用请求函数
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
   const url = `${API_BASE}${path}`
@@ -199,14 +197,10 @@ export const fieldsApi = {
 
   create: async (data: CreateFieldRequest) => {
     if (USE_TAURI_COMMANDS) {
-      console.log('[fieldsApi.create] Input data:', JSON.stringify(data))
-
       // 参数验证
       const projectId = Number(data.project_id)
       if (!projectId || isNaN(projectId) || projectId <= 0) {
-        const error = `无效的项目 ID: ${data.project_id}`
-        console.error('[fieldsApi.create] Validation error:', error)
-        throw new Error(error)
+        throw new Error(`无效的项目 ID: ${data.project_id}`)
       }
 
       const params = {
@@ -220,17 +214,8 @@ export const fieldsApi = {
         validationRule: data.validation_rule || null,
         extractionHint: data.extraction_hint || null,
       }
-      console.log('[fieldsApi.create] Prepared params:', JSON.stringify(params))
-      console.log('[fieldsApi.create] About to call invoke...')
 
-      try {
-        const result = await invoke<ProjectField>('create_field', params)
-        console.log('[fieldsApi.create] Success:', result)
-        return result
-      } catch (error) {
-        console.error('[fieldsApi.create] Error:', error)
-        throw error
-      }
+      return await invoke<ProjectField>('create_field', params)
     }
     return request<ProjectField>('/fields/', {
       method: 'POST',
@@ -256,17 +241,8 @@ export const fieldsApi = {
         validationRule: data.validation_rule || null,
         extractionHint: data.extraction_hint || null,
       }
-      console.log('[fieldsApi.update] Calling with params:', JSON.stringify(params))
-      try {
-        const result = await invoke<ProjectField>('update_field', params)
-        console.log('[fieldsApi.update] Success:', result)
-        return result
-      } catch (error) {
-        console.error('[fieldsApi.update] Error:', error)
-        // 确保错误是 Error 对象
-        const err = error instanceof Error ? error : new Error(String(error))
-        throw err
-      }
+
+      return await invoke<ProjectField>('update_field', params)
     }
     return request<ProjectField>(`/fields/${id}`, {
       method: 'PUT',

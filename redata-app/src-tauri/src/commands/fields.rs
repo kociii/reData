@@ -287,20 +287,7 @@ pub async fn create_field(
     validation_rule: Option<String>,
     extraction_hint: Option<String>,
 ) -> Result<FieldResponse, String> {
-    // 第一时间打印日志，确认函数被调用
-    eprintln!("===== create_field START =====");
-    eprintln!("project_id: {}", project_id);
-    eprintln!("field_name: {}", field_name);
-    eprintln!("field_label: {}", field_label);
-    eprintln!("field_type: {}", field_type);
-    eprintln!("is_required: {:?}", is_required);
-    eprintln!("is_dedup_key: {:?}", is_dedup_key);
-    eprintln!("additional_requirement: {:?}", additional_requirement);
-    eprintln!("validation_rule: {:?}", validation_rule);
-    eprintln!("extraction_hint: {:?}", extraction_hint);
-    eprintln!("===== create_field PARAMS END =====");
-
-    tracing::info!("create_field called: project_id={}, field_name={}, field_label={}, field_type={}",
+    tracing::debug!("create_field called: project_id={}, field_name={}, field_label={}, field_type={}",
         project_id, field_name, field_label, field_type);
 
     // 验证必需参数
@@ -539,21 +526,11 @@ pub async fn delete_field(
     db: tauri::State<'_, Arc<DatabaseConnection>>,
     id: i32,
 ) -> Result<(), String> {
-    eprintln!("===== delete_field START: id={} =====", id);
-
     let field = ProjectField::find_by_id(id)
         .one(db.inner().as_ref())
         .await
-        .map_err(|e| {
-            eprintln!("delete_field: find error - {}", e);
-            format!("数据库错误: {}", e)
-        })?
-        .ok_or_else(|| {
-            eprintln!("delete_field: field {} not found", id);
-            format!("字段 {} 不存在", id)
-        })?;
-
-    eprintln!("delete_field: found field '{}', setting is_deleted=true", field.field_name);
+        .map_err(|e| format!("数据库错误: {}", e))?
+        .ok_or_else(|| format!("字段 {} 不存在", id))?;
 
     let mut active: field::ActiveModel = field.into();
     active.is_deleted = Set(true);
@@ -562,12 +539,8 @@ pub async fn delete_field(
     active
         .update(db.inner().as_ref())
         .await
-        .map_err(|e| {
-            eprintln!("delete_field: update error - {}", e);
-            format!("数据库错误: {}", e)
-        })?;
+        .map_err(|e| format!("数据库错误: {}", e))?;
 
-    eprintln!("===== delete_field SUCCESS =====");
     Ok(())
 }
 

@@ -5,7 +5,7 @@
 
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, ConnectionTrait, DatabaseConnection, EntityTrait,
-    QueryFilter, Set, Statement, PaginatorTrait,
+    QueryFilter, Set, Statement, PaginatorTrait, TransactionTrait,
 };
 use serde::Serialize;
 use serde_json::Value as JsonValue;
@@ -103,6 +103,8 @@ pub async fn insert_record(
 }
 
 /// 批量插入记录
+///
+/// 使用事务批量插入，每 500 条记录为一批，避免 SQLite 参数限制
 #[tauri::command]
 pub async fn insert_records_batch(
     db: tauri::State<'_, Arc<DatabaseConnection>>,
@@ -112,36 +114,71 @@ pub async fn insert_records_batch(
     source_sheet: Option<String>,
     batch_number: Option<String>,
 ) -> Result<u64, String> {
-    let now = chrono::Utc::now().to_rfc3339();
-    let mut count: u64 = 0;
-
-    for (idx, data) in records.iter().enumerate() {
-        let data_str = serde_json::to_string(data)
-            .map_err(|e| format!("JSON 序列化错误 (行 {}): {}", idx, e))?;
-
-        let new_record = record::ActiveModel {
-            project_id: Set(project_id),
-            data: Set(data_str),
-            source_file: Set(source_file.clone()),
-            source_sheet: Set(source_sheet.clone()),
-            row_number: Set(Some(idx as i32 + 1)),
-            batch_number: Set(batch_number.clone()),
-            status: Set("success".to_string()),
-            error_message: Set(None),
-            created_at: Set(now.clone()),
-            updated_at: Set(None),
-            ..Default::default()
-        };
-
-        new_record
-            .insert(db.inner().as_ref())
-            .await
-            .map_err(|e| format!("数据库错误 (行 {}): {}", idx, e))?;
-
-        count += 1;
+    if records.is_empty() {
+        return Ok(0);
     }
 
-    Ok(count)
+    let total_count = records.len() as u64;
+
+    // 使用事务批量插入
+    let txn = db
+        .inner()
+        .as_ref()
+        .begin()
+        .await
+        .map_err(|e| format!("开启事务失败: {}", e))?;
+
+    // 预先克隆共享值，避免循环中重复克隆
+    let source_file_val = source_file.clone();
+    let source_sheet_val = source_sheet.clone();
+    let batch_number_val = batch_number.clone();
+
+    // 分批插入，每批 500 条（SQLite 参数限制约 32766）
+    const CHUNK_SIZE: usize = 500;
+
+    for chunk in records.chunks(CHUNK_SIZE) {
+        // 构建批量插入 SQL
+        let mut params: Vec<sea_orm::Value> = Vec::new();
+        let mut placeholders: Vec<String> = Vec::new();
+
+        for (idx, data) in chunk.iter().enumerate() {
+            let data_str = serde_json::to_string(data)
+                .map_err(|e| format!("JSON 序列化错误: {}", e))?;
+
+            let row_number = idx as i32 + 1;
+
+            placeholders.push("(?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), NULL)".to_string());
+            params.push(project_id.into());
+            params.push(data_str.into());
+            params.push(source_file_val.clone().into());
+            params.push(source_sheet_val.clone().into());
+            params.push(Some(row_number).into());
+            params.push(batch_number_val.clone().into());
+            params.push("success".to_string().into());
+            params.push(Option::<String>::None.into());
+        }
+
+        let insert_sql = format!(
+            "INSERT INTO project_records \
+             (project_id, data, source_file, source_sheet, row_number, batch_number, status, error_message, created_at, updated_at) \
+             VALUES {}",
+            placeholders.join(", ")
+        );
+
+        txn.execute(Statement::from_sql_and_values(
+            txn.get_database_backend(),
+            &insert_sql,
+            params,
+        ))
+        .await
+        .map_err(|e| format!("批量插入失败: {}", e))?;
+    }
+
+    txn.commit()
+        .await
+        .map_err(|e| format!("提交事务失败: {}", e))?;
+
+    Ok(total_count)
 }
 
 /// 分页查询记录（支持搜索和 json_extract 过滤）
@@ -611,6 +648,20 @@ fn json_value_to_string(v: &JsonValue) -> String {
 
 // ============ xlsx 导出辅助 ============
 
+/// 验证字段 ID 格式，防止 SQL 注入
+/// 字段 ID 应该只包含数字（如 "1", "23"）
+fn validate_field_id(field: &str) -> Result<String, String> {
+    if field.is_empty() {
+        return Err("字段 ID 不能为空".to_string());
+    }
+    // 字段 ID 应该是纯数字
+    if field.chars().all(|c| c.is_ascii_digit()) {
+        Ok(field.to_string())
+    } else {
+        Err(format!("无效的字段 ID 格式: {}", field))
+    }
+}
+
 /// 辅助函数：根据高级筛选请求构建 WHERE 子句和参数列表
 fn build_where_for_filter(project_id: i32, filter: &AdvancedFilterRequest) -> (String, Vec<String>) {
     let conjunction = filter.conjunction.as_deref().unwrap_or("and");
@@ -644,7 +695,12 @@ fn build_where_for_filter(project_id: i32, filter: &AdvancedFilterRequest) -> (S
 
     let mut field_conditions: Vec<String> = Vec::new();
     for cond in &filter.conditions {
-        let field_expr = format!("json_extract(data, '$.{}')", cond.field);
+        // 验证字段 ID 格式，防止 SQL 注入
+        let field_id = match validate_field_id(&cond.field) {
+            Ok(id) => id,
+            Err(_) => continue, // 跳过无效字段
+        };
+        let field_expr = format!("json_extract(data, '$.{}')", field_id);
         match &cond.operator {
             FilterOperator::Eq => {
                 if let Some(v) = &cond.value {

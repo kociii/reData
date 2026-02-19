@@ -278,27 +278,16 @@ async function saveField() {
     // 优先使用用户填写的 extraction_hint
     let extractionHint = fieldForm.extraction_hint.trim() || editingField.value?.extraction_hint || ''
 
-    console.log('[saveField] Starting save...', {
-      isEditing: !!editingField.value,
-      isLabelChanged,
-      fieldName,
-      validationRule,
-      extractionHint
-    })
-
     // 仅在新增或字段标签变化时调用 AI 翻译
     if (!editingField.value || isLabelChanged) {
-      console.log('[saveField] Calling metadata generation...')
       // 尝试使用 AI 翻译字段名
       if (configStore.defaultConfig) {
         try {
-          console.log('[saveField] Using AI translation with config:', configStore.defaultConfig.id)
           const aiResult = await aiServiceApi.generateFieldMetadataWithAI(
             configStore.defaultConfig.id,
             fieldForm.field_label,
             fieldForm.field_type
           )
-          console.log('[saveField] AI result:', aiResult)
           fieldName = aiResult.field_name || generateFallbackFieldName(fieldForm.field_label)
           validationRule = aiResult.validation_rule || null
           // 如果用户没有填写 extraction_hint，使用 AI 生成的
@@ -319,7 +308,6 @@ async function saveField() {
           }
         }
       } else {
-        console.log('[saveField] No AI config, using local generation')
         // 没有 AI 配置时使用本地生成
         const localResult = await fieldsApi.generateMetadata({
           field_label: fieldForm.field_label,
@@ -352,15 +340,7 @@ async function saveField() {
       return
     }
 
-    console.log('[saveField] Final values:', {
-      fieldName,
-      validationRule,
-      extractionHint,
-      projectId: projectId.value
-    })
-
     if (editingField.value) {
-      console.log('[saveField] Calling updateField with id:', editingField.value.id)
       await fieldStore.updateField(editingField.value.id, {
         field_label: fieldForm.field_label.trim(),
         field_type: fieldForm.field_type,
@@ -372,7 +352,6 @@ async function saveField() {
       })
       toast.add({ title: '字段已更新', color: 'success' })
     } else {
-      console.log('[saveField] Calling createField with project_id:', projectId.value)
       await fieldStore.createField({
         project_id: projectId.value,
         field_label: fieldForm.field_label.trim(),
@@ -414,7 +393,6 @@ async function deleteField() {
 
   deleting.value = true
   try {
-    console.log('[deleteField] Deleting field id:', fieldToDelete.value.id)
     await fieldStore.deleteField(fieldToDelete.value.id)
     showDeleteModal.value = false
     fieldToDelete.value = null

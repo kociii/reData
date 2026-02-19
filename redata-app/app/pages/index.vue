@@ -453,6 +453,7 @@ definePageMeta({ layout: 'default' })
 
 const projectStore = useProjectStore()
 const tabStore = useTabStore()
+const route = useRoute()
 const router = useRouter()
 const toast = useToast()
 
@@ -461,7 +462,10 @@ const backendError = ref(false)
 
 // 分组相关
 const groups = ref<GroupWithChildren[]>([])
-const selectedGroupId = ref<number | null>(null)
+// 从 URL 参数初始化分组筛选
+const selectedGroupId = ref<number | null>(
+  route.query.group ? Number(route.query.group) : null
+)
 const expandedGroups = ref<Set<number>>(new Set())
 const loadingGroups = ref(false)
 
@@ -503,9 +507,20 @@ const groupToDelete = ref<GroupWithChildren | null>(null)
 const totalProjectCount = computed(() => projectStore.projects.length)
 
 const filteredProjects = computed(() => {
+  let result = projectStore.projects
+
+  // 按分组筛选
+  if (selectedGroupId.value !== null) {
+    result = result.filter(p => p.group_id === selectedGroupId.value)
+  }
+
+  // 按搜索词筛选
   const q = searchQuery.value.trim().toLowerCase()
-  if (!q) return projectStore.projects
-  return projectStore.projects.filter(p => p.name.toLowerCase().includes(q))
+  if (q) {
+    result = result.filter(p => p.name.toLowerCase().includes(q))
+  }
+
+  return result
 })
 
 const isAllSelected = computed(
@@ -595,6 +610,14 @@ async function loadProjectRecordCounts() {
 // 分组操作
 function selectGroup(groupId: number | null) {
   selectedGroupId.value = groupId
+  // 更新 URL 参数（不触发导航）
+  const query = { ...route.query }
+  if (groupId === null) {
+    delete query.group
+  } else {
+    query.group = String(groupId)
+  }
+  router.replace({ query })
   // 切换分组时清空编辑模式的选择
   if (isEditMode.value) {
     selectedProjectIds.value = new Set()

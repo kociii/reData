@@ -24,26 +24,53 @@ pub enum CryptoError {
 }
 
 /// 获取加密密钥
-/// 从环境变量 ENCRYPTION_KEY 读取，如果不存在则使用默认密钥（仅用于开发）
+/// 从环境变量 ENCRYPTION_KEY 读取
+/// - 开发环境：未设置时使用默认密钥并发出警告
+/// - 生产环境：必须设置，否则 panic
 fn get_encryption_key() -> [u8; 32] {
     if let Ok(key_str) = env::var("ENCRYPTION_KEY") {
         let key_bytes = general_purpose::STANDARD
-            .decode(key_str)
-            .unwrap_or_else(|_| vec![0u8; 32]);
+            .decode(&key_str)
+            .unwrap_or_else(|_| {
+                tracing::error!("ENCRYPTION_KEY is not valid base64, using fallback");
+                vec![0u8; 32]
+            });
+
+        if key_bytes.len() < 32 {
+            tracing::error!(
+                "ENCRYPTION_KEY decoded to {} bytes, need 32 bytes",
+                key_bytes.len()
+            );
+        }
 
         let mut key = [0u8; 32];
         key.copy_from_slice(&key_bytes[..32.min(key_bytes.len())]);
         key
     } else {
-        // 默认密钥（仅用于开发环境）
-        // 生产环境必须设置 ENCRYPTION_KEY 环境变量
-        tracing::warn!("Using default encryption key. Set ENCRYPTION_KEY environment variable for production.");
-        [
-            0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07,
-            0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f,
-            0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17,
-            0x18, 0x19, 0x1a, 0x1b, 0x1c, 0x1d, 0x1e, 0x1f,
-        ]
+        // 生产环境强制要求设置密钥
+        #[cfg(not(debug_assertions))]
+        {
+            panic!(
+                "ENCRYPTION_KEY environment variable must be set in production!\n\
+                Generate a 32-byte key and encode it as base64:\n\
+                openssl rand -base64 32"
+            );
+        }
+
+        // 开发环境使用默认密钥
+        #[cfg(debug_assertions)]
+        {
+            tracing::warn!(
+                "SECURITY WARNING: Using default encryption key. \
+                Set ENCRYPTION_KEY environment variable for production."
+            );
+            [
+                0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07,
+                0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f,
+                0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17,
+                0x18, 0x19, 0x1a, 0x1b, 0x1c, 0x1d, 0x1e, 0x1f,
+            ]
+        }
     }
 }
 

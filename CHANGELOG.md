@@ -5,6 +5,65 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.2] - 2026-02-19
+
+### Added
+
+#### Excel 导出功能
+- **xlsx 格式导出** - 使用 rust_xlsxwriter 生成 Excel 文件
+- **三种导出范围** - 全部数据/筛选结果/当前页
+- **原生保存对话框** - 选择导出路径和文件名
+- **可选导出内容** - 自选字段、导入时间、来源文件
+
+#### 数据结果页增强
+- **每页数量选择** - 支持 50/100/200/500 条每页
+- **导入时间列** - 显示记录导入时间
+- **高级筛选** - 13 种运算符（等于/包含/范围/为空等），且/或组合
+
+#### 数据处理页优化
+- **任务重启复用文件** - 重新开始时自动复用原文件路径
+- **进度显示优化** - 修复重复文件名显示问题
+
+#### 项目分组管理
+- **分组筛选** - 按分组筛选项目，支持 URL 参数持久化
+- **分组树形结构** - 支持父子层级关系
+- **批量移动项目** - 将多个项目移动到指定分组
+
+### Changed
+
+#### UI/UX 优化
+- **设置页简化** - 危险操作仅保留"删除项目"
+- **分组筛选持久化** - 使用 URL 参数保持筛选状态
+
+### Fixed
+
+- 修复分组筛选功能失效
+- 修复分组筛选状态在导航后丢失
+- 修复 pageSize 修改后数据不加载
+
+### Technical
+
+#### 性能优化
+- **N+1 查询优化** - `get_project_batches_with_stats` 改为单次聚合查询
+- **批量插入优化** - `insert_records_batch` 使用事务批量插入（500条/批）
+- **批量更新优化** - `delete_project_group` 使用单条 UPDATE 语句
+
+#### 安全增强
+- **加密密钥校验** - 生产环境强制要求设置 ENCRYPTION_KEY
+- **SQL 注入防护** - 筛选字段 ID 验证（仅允许数字）
+- **调试日志清理** - 移除生产代码中的 console.log/eprintln
+
+#### Tauri Commands（新增）
+- `export_records_xlsx` - 导出记录为 xlsx 文件
+- `get_project_batches_with_stats` - 获取项目导入记录（优化版）
+- `batch_move_projects` - 批量移动项目到分组
+- `move_project_to_group` - 移动单个项目到分组
+- `get_project_groups` / `get_project_groups_flat` - 获取分组列表
+- `create_project_group` / `update_project_group` / `delete_project_group` - 分组 CRUD
+- `reorder_project_groups` - 分组排序
+
+---
+
 ## [0.1.1] - 2026-02-19
 
 ### Added
@@ -112,7 +171,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### [0.2.0] - 计划中
 
-- 数据导出功能（Excel/CSV）
 - 批量编辑记录
 - 数据统计图表
 - 多语言支持
@@ -121,11 +179,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### [0.3.0] - 计划中
 
 - 自定义字段类型
-- 高级筛选功能
 - 数据对比功能
-- 批次管理优化
 
 ---
 
+[0.1.2]: https://github.com/your-repo/reData/releases/tag/v0.1.2
 [0.1.1]: https://github.com/your-repo/reData/releases/tag/v0.1.1
 [0.1.0]: https://github.com/your-repo/reData/releases/tag/v0.1.0

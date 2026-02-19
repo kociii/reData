@@ -517,52 +517,86 @@ pub async fn get_project_batches_with_stats(
         .await
         .map_err(|e| format!("数据库错误: {}", e))?;
 
-    let mut results = Vec::new();
+    if tasks.is_empty() {
+        return Ok(Vec::new());
+    }
 
-    for task_model in tasks {
-        let batch_number = match task_model.batch_number.clone() {
-            Some(bn) => bn,
-            None => continue,
-        };
+    // 收集所有 batch_number，用于单次聚合查询
+    let batch_numbers: Vec<String> = tasks
+        .iter()
+        .filter_map(|t| t.batch_number.clone())
+        .collect();
 
-        // 从 source_files JSON 提取第一个文件名作为显示名称
-        let source_file = task_model.source_files
-            .as_deref()
-            .and_then(|s| serde_json::from_str::<Vec<String>>(s).ok())
-            .and_then(|v| v.into_iter().next())
-            .unwrap_or_else(|| batch_number.clone());
+    // 单次聚合查询获取所有批次的记录数，避免 N+1 问题
+    let mut record_counts: std::collections::HashMap<String, i64> =
+        std::collections::HashMap::new();
 
-        // 查询实时记录数
-        let count_sql = "SELECT COUNT(*) FROM project_records WHERE project_id = ? AND batch_number = ?";
-        let actual_count: i64 = db.inner().as_ref()
-            .query_one(Statement::from_sql_and_values(
+    if !batch_numbers.is_empty() {
+        let placeholders: Vec<&str> = batch_numbers.iter().map(|_| "?").collect();
+        let count_sql = format!(
+            "SELECT batch_number, COUNT(*) as cnt FROM project_records \
+             WHERE project_id = ? AND batch_number IN ({}) \
+             GROUP BY batch_number",
+            placeholders.join(",")
+        );
+
+        let mut params: Vec<sea_orm::Value> = vec![project_id.into()];
+        for bn in &batch_numbers {
+            params.push(bn.clone().into());
+        }
+
+        let rows = db
+            .inner()
+            .as_ref()
+            .query_all(Statement::from_sql_and_values(
                 db.inner().as_ref().get_database_backend(),
-                count_sql,
-                [project_id.into(), batch_number.clone().into()],
+                &count_sql,
+                params,
             ))
             .await
-            .map_err(|e| format!("数据库错误: {}", e))?
-            .map(|r| r.try_get_by_index::<i64>(0).unwrap_or(0))
-            .unwrap_or(0);
+            .map_err(|e| format!("数据库错误: {}", e))?;
 
-        let status = if actual_count > 0 {
-            task_model.status.clone()
-        } else if task_model.status == "completed" {
-            "rolled_back".to_string()
-        } else {
-            task_model.status.clone()
-        };
-
-        results.push(BatchDetailResponse {
-            batch_number,
-            task_id: task_model.id,
-            source_file,
-            project_id: task_model.project_id,
-            created_at: task_model.created_at.to_rfc3339(),
-            status,
-            total_records: actual_count as i32,
-        });
+        for row in rows {
+            let bn: String = row.try_get_by_index::<String>(0).unwrap_or_default();
+            let cnt: i64 = row.try_get_by_index::<i64>(1).unwrap_or(0);
+            record_counts.insert(bn, cnt);
+        }
     }
+
+    // 构建响应
+    let results: Vec<BatchDetailResponse> = tasks
+        .into_iter()
+        .filter_map(|task_model| {
+            let batch_number = task_model.batch_number.clone()?;
+            let actual_count = record_counts.get(&batch_number).copied().unwrap_or(0);
+
+            // 从 source_files JSON 提取第一个文件名作为显示名称
+            let source_file = task_model
+                .source_files
+                .as_deref()
+                .and_then(|s| serde_json::from_str::<Vec<String>>(s).ok())
+                .and_then(|v| v.into_iter().next())
+                .unwrap_or_else(|| batch_number.clone());
+
+            let status = if actual_count > 0 {
+                task_model.status.clone()
+            } else if task_model.status == "completed" {
+                "rolled_back".to_string()
+            } else {
+                task_model.status.clone()
+            };
+
+            Some(BatchDetailResponse {
+                batch_number,
+                task_id: task_model.id,
+                source_file,
+                project_id: task_model.project_id,
+                created_at: task_model.created_at.to_rfc3339(),
+                status,
+                total_records: actual_count as i32,
+            })
+        })
+        .collect();
 
     Ok(results)
 }

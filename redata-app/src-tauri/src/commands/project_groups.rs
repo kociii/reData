@@ -1,8 +1,8 @@
 // 项目分组管理 Tauri Commands
 
 use sea_orm::{
-    ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait,
-    QueryFilter, QueryOrder, Set,
+    ActiveModelTrait, ColumnTrait, ConnectionTrait, DatabaseConnection, EntityTrait,
+    QueryFilter, QueryOrder, Set, Statement,
 };
 use serde::Serialize;
 use std::sync::Arc;
@@ -236,35 +236,27 @@ pub async fn delete_project_group(
     db: tauri::State<'_, Arc<DatabaseConnection>>,
     group_id: i32,
 ) -> Result<(), String> {
-    // 将该分组下的项目的 group_id 置空
-    let projects = Project::find()
-        .filter(project::Column::GroupId.eq(group_id))
-        .all(db.inner().as_ref())
+    // 批量更新：将该分组下的项目的 group_id 置空
+    db.inner()
+        .as_ref()
+        .execute(Statement::from_sql_and_values(
+            db.inner().as_ref().get_database_backend(),
+            "UPDATE projects SET group_id = NULL WHERE group_id = ?",
+            vec![group_id.into()],
+        ))
         .await
-        .map_err(|e| format!("数据库错误: {}", e))?;
+        .map_err(|e| format!("更新项目失败: {}", e))?;
 
-    for p in projects {
-        let mut active: project::ActiveModel = p.into();
-        active.group_id = Set(None);
-        active.update(db.inner().as_ref())
-            .await
-            .map_err(|e| format!("更新项目失败: {}", e))?;
-    }
-
-    // 将子分组的 parent_id 置空
-    let children = ProjectGroup::find()
-        .filter(project_group::Column::ParentId.eq(group_id))
-        .all(db.inner().as_ref())
+    // 批量更新：将子分组的 parent_id 置空
+    db.inner()
+        .as_ref()
+        .execute(Statement::from_sql_and_values(
+            db.inner().as_ref().get_database_backend(),
+            "UPDATE project_groups SET parent_id = NULL WHERE parent_id = ?",
+            vec![group_id.into()],
+        ))
         .await
-        .map_err(|e| format!("数据库错误: {}", e))?;
-
-    for c in children {
-        let mut active: project_group::ActiveModel = c.into();
-        active.parent_id = Set(None);
-        active.update(db.inner().as_ref())
-            .await
-            .map_err(|e| format!("更新子分组失败: {}", e))?;
-    }
+        .map_err(|e| format!("更新子分组失败: {}", e))?;
 
     // 删除分组
     ProjectGroup::delete_by_id(group_id)
