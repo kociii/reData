@@ -4,7 +4,7 @@
 
 **AI 驱动的 Excel 数据提取桌面应用**
 
-[![Version](https://img.shields.io/badge/Version-0.1.0-green)]()
+[![Version](https://img.shields.io/badge/Version-0.1.1-green)]()
 
 </div>
 
@@ -54,12 +54,16 @@ npm run tauri:build
 
 | 类型 | 说明 | 示例 |
 |------|------|------|
-| text | 普通文本 | 姓名、地址 |
+| text | 普通文本 | 备注、描述 |
+| name | 姓名 | 2-4个中文字符或英文人名 |
+| company | 公司名称 | 含"有限公司"、"集团"等标识 |
 | phone | 手机号码 | 自动去除空格和特殊字符 |
 | email | 邮箱地址 | 自动转小写 |
 | number | 数字 | 年龄、数量 |
 | date | 日期 | 支持多种格式 |
-| id_card | 身份证号 | 18位身份证 |
+| id_card | 身份证号 | 15或18位身份证 |
+| address | 地址 | 含省/市/区/路等 |
+| url | 网址 | http/https 开头 |
 
 ## 文档
 
@@ -72,4 +76,4 @@ npm run tauri:build
 
 ---
 
-**版本**: v0.1.0 | **发布日期**: 2026-02-18
+**版本**: v0.1.1 | **发布日期**: 2026-02-19

@@ -1,5 +1,5 @@
 <template>
-  <div class="py-4">
+  <div class="py-4 px-6 h-full overflow-auto">
     <!-- 工具栏 -->
     <div class="flex justify-between items-center mb-4">
       <div class="text-sm text-muted">
@@ -28,10 +28,10 @@
       <table class="min-w-full divide-y divide-default">
         <thead class="bg-muted">
           <tr>
-            <th class="px-4 py-3 text-left text-xs font-medium text-muted uppercase tracking-wider w-12">
+            <th class="px-4 py-3 text-center text-xs font-medium text-muted uppercase tracking-wider w-24">
               必填
             </th>
-            <th class="px-4 py-3 text-left text-xs font-medium text-muted uppercase tracking-wider w-12">
+            <th class="px-4 py-3 text-center text-xs font-medium text-muted uppercase tracking-wider w-24">
               去重
             </th>
             <th class="px-4 py-3 text-left text-xs font-medium text-muted uppercase tracking-wider">
@@ -61,7 +61,7 @@
               <UIcon v-if="field.is_required" name="i-lucide-check" class="w-4 h-4 text-success" />
             </td>
             <td class="px-4 py-3 text-center">
-              <UIcon v-if="field.is_dedup_key" name="i-lucide-fingerprint" class="w-4 h-4 text-primary" />
+              <UIcon v-if="field.is_dedup_key" name="i-lucide-check" class="w-4 h-4 text-success" />
             </td>
             <td class="px-4 py-3 text-sm text-highlighted">
               {{ field.field_label }}
@@ -108,6 +108,15 @@
 
           <UFormField label="字段类型" name="field_type" required>
             <USelect v-model="fieldForm.field_type" :items="fieldTypes" class="w-full" />
+          </UFormField>
+
+          <UFormField label="AI 提取要求" name="extraction_hint" hint="可选，自定义 AI 识别此字段时的额外要求">
+            <UTextarea
+              v-model="fieldForm.extraction_hint"
+              placeholder="例如：公司名称必须包含&quot;有限公司&quot;、&quot;股份公司&quot;或 Inc、Ltd 等关键词"
+              :rows="2"
+              class="w-full"
+            />
           </UFormField>
 
           <USwitch v-model="fieldForm.is_required" label="必填字段" />
@@ -179,6 +188,7 @@ const configStore = useConfigStore()
 // 字段类型选项
 const fieldTypes = [
   { value: 'text', label: '文本' },
+  { value: 'name', label: '姓名' },
   { value: 'number', label: '数字' },
   { value: 'phone', label: '手机号' },
   { value: 'email', label: '邮箱' },
@@ -186,6 +196,7 @@ const fieldTypes = [
   { value: 'date', label: '日期' },
   { value: 'address', label: '地址' },
   { value: 'company', label: '公司' },
+  { value: 'id_card', label: '身份证' },
 ]
 
 function getFieldTypeLabel(type: string) {
@@ -201,6 +212,7 @@ const fieldForm = reactive({
   field_type: 'text',
   is_required: false,
   is_dedup_key: false,
+  extraction_hint: '',
 })
 
 function openFieldModal(field?: ProjectField) {
@@ -210,12 +222,14 @@ function openFieldModal(field?: ProjectField) {
     fieldForm.field_type = field.field_type
     fieldForm.is_required = field.is_required
     fieldForm.is_dedup_key = field.is_dedup_key || false
+    fieldForm.extraction_hint = field.extraction_hint || ''
   } else {
     editingField.value = null
     fieldForm.field_label = ''
     fieldForm.field_type = 'text'
     fieldForm.is_required = false
     fieldForm.is_dedup_key = false
+    fieldForm.extraction_hint = ''
   }
   showFieldModal.value = true
 }
@@ -239,6 +253,20 @@ async function saveField() {
     return
   }
 
+  // 中文名重复校验（排除当前编辑字段本身）
+  const labelDuplicate = fieldStore.fields.find(f =>
+    f.field_label.trim() === fieldForm.field_label.trim() &&
+    f.id !== editingField.value?.id
+  )
+  if (labelDuplicate) {
+    toast.add({
+      title: '字段名称重复',
+      description: `已存在名称为"${fieldForm.field_label.trim()}"的字段`,
+      color: 'error',
+    })
+    return
+  }
+
   saving.value = true
   try {
     // 编辑模式：检查字段标签是否变化
@@ -247,7 +275,8 @@ async function saveField() {
 
     let fieldName = editingField.value?.field_name || ''
     let validationRule = editingField.value?.validation_rule
-    let extractionHint = editingField.value?.extraction_hint || ''
+    // 优先使用用户填写的 extraction_hint
+    let extractionHint = fieldForm.extraction_hint.trim() || editingField.value?.extraction_hint || ''
 
     console.log('[saveField] Starting save...', {
       isEditing: !!editingField.value,
@@ -272,7 +301,10 @@ async function saveField() {
           console.log('[saveField] AI result:', aiResult)
           fieldName = aiResult.field_name || generateFallbackFieldName(fieldForm.field_label)
           validationRule = aiResult.validation_rule || null
-          extractionHint = aiResult.extraction_hint || `提取${fieldForm.field_label.trim()}字段`
+          // 如果用户没有填写 extraction_hint，使用 AI 生成的
+          if (!extractionHint) {
+            extractionHint = aiResult.extraction_hint || `提取${fieldForm.field_label.trim()}字段`
+          }
         } catch (aiError) {
           console.warn('[saveField] AI 翻译失败，使用本地生成:', aiError)
           // AI 失败时使用本地生成
@@ -282,7 +314,9 @@ async function saveField() {
           })
           fieldName = localResult.field_name || generateFallbackFieldName(fieldForm.field_label)
           validationRule = localResult.validation_rule || null
-          extractionHint = localResult.extraction_hint || `提取${fieldForm.field_label.trim()}字段`
+          if (!extractionHint) {
+            extractionHint = localResult.extraction_hint || `提取${fieldForm.field_label.trim()}字段`
+          }
         }
       } else {
         console.log('[saveField] No AI config, using local generation')
@@ -293,13 +327,29 @@ async function saveField() {
         })
         fieldName = localResult.field_name || generateFallbackFieldName(fieldForm.field_label)
         validationRule = localResult.validation_rule || null
-        extractionHint = localResult.extraction_hint || `提取${fieldForm.field_label.trim()}字段`
+        if (!extractionHint) {
+          extractionHint = localResult.extraction_hint || `提取${fieldForm.field_label.trim()}字段`
+        }
       }
     }
 
     // 确保 fieldName 不为空
     if (!fieldName || !fieldName.trim()) {
       fieldName = generateFallbackFieldName(fieldForm.field_label)
+    }
+
+    // 英文名重复校验（排除当前编辑字段本身）
+    const nameDuplicate = fieldStore.fields.find(f =>
+      f.field_name.trim() === fieldName.trim() &&
+      f.id !== editingField.value?.id
+    )
+    if (nameDuplicate) {
+      toast.add({
+        title: '字段英文名重复',
+        description: `英文名"${fieldName}"已被字段"${nameDuplicate.field_label}"使用，请修改字段名称后重试`,
+        color: 'error',
+      })
+      return
     }
 
     console.log('[saveField] Final values:', {

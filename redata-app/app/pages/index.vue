@@ -1,5 +1,5 @@
 <template>
-  <div class="space-y-4">
+  <div class="space-y-4 h-full overflow-auto p-6">
     <!-- 后端连接错误提示 -->
     <div
       v-if="backendError"

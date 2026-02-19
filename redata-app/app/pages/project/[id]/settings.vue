@@ -1,5 +1,5 @@
 <template>
-  <div class="space-y-6">
+  <div class="space-y-6 h-full overflow-auto p-6">
     <!-- 基本信息 -->
     <div class="bg-elevated rounded-lg border border-default">
       <div class="px-6 py-4 border-b border-default flex items-center justify-between">

@@ -74,6 +74,7 @@ export interface FieldDefinition {
   field_label: string
   field_type: string
   additional_requirement?: string | null
+  extraction_hint?: string | null
 }
 
 export interface FieldMapping {
@@ -179,6 +180,10 @@ export interface ProcessingProgress {
   mappings?: Record<string, string>
   confidence?: number
   unmatched_columns?: number[]
+  // Sheet 完成事件附加字段
+  sheet_success_count?: number
+  sheet_error_count?: number
+  sheet_total_rows?: number
 }
 
 // 处理阶段类型
@@ -254,7 +259,7 @@ export interface ListTasksResponse {
 
 export type SheetPhase = 'waiting' | 'ai_analyzing' | 'importing' | 'done' | 'error'
 export type FilePhase = 'waiting' | 'processing' | 'done' | 'error'
-export type TaskPhase = 'starting' | 'processing' | 'paused' | 'completed' | 'cancelled' | 'error'
+export type TaskPhase = 'starting' | 'processing' | 'paused' | 'completed' | 'cancelled' | 'error' | 'interrupted'
 
 export interface SheetProgress {
   sheetName: string
@@ -262,6 +267,9 @@ export interface SheetProgress {
   aiConfidence: number | null    // 0-1，null=尚未完成 AI 分析
   mappingCount: number | null    // 映射成功的字段数，null=尚未完成
   errorMessage: string | null
+  successCount: number           // Sheet 级别成功数
+  errorCount: number             // Sheet 级别错误数
+  totalRows: number              // Sheet 级别总行数
 }
 
 export interface FileProgress {
@@ -286,4 +294,31 @@ export interface TaskProgress {
   errorCount: number
   startedAt: string
   completedAt: string | null
+}
+
+// ── 完整进度响应类型（从后端获取）────────────────────────────────────────────────
+
+export interface SheetProgressResponse {
+  sheet_name: string
+  sheet_phase: string
+  ai_confidence: number | null
+  mapping_count: number | null
+  success_count: number
+  error_count: number
+  total_rows: number
+  error_message: string | null
+}
+
+export interface FileProgressResponse {
+  file_name: string
+  file_phase: string
+  sheets: SheetProgressResponse[]
+  total_rows: number
+  success_count: number
+  error_count: number
+}
+
+export interface FullTaskProgressResponse {
+  task_id: string
+  files: FileProgressResponse[]
 }

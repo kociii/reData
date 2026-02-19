@@ -1,11 +1,11 @@
 <template>
-  <div class="min-h-screen flex flex-col bg-muted">
+  <div class="h-screen flex flex-col bg-muted">
     <!-- 顶部标题栏 -->
     <header class="bg-elevated shadow-sm border-b border-default flex-shrink-0">
       <div class="px-6 h-14 flex items-center justify-between">
         <!-- 左侧：Logo + 标题 -->
         <div class="flex items-center gap-2">
-          <img src="/logo.png" alt="reData Logo" class="w-8 h-8 rounded-lg" />
+          <img src="/logo.svg" alt="reData Logo" class="w-8 h-8" />
           <span class="text-lg font-bold text-highlighted">reData</span>
         </div>
 
@@ -94,7 +94,7 @@
     </nav>
 
     <!-- 主内容区域 -->
-    <main class="flex-1 p-6 overflow-auto">
+    <main class="flex-1 overflow-hidden">
       <slot />
     </main>
 

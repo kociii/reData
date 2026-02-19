@@ -14,12 +14,31 @@ use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, LazyLock};
 
+use super::tasks::upsert_file_progress;
+
 /// 将一行数据格式化为索引字符串，格式：1:列1内容;2:列2内容;...n:列n内容;
 fn format_row_indexed(row: &[String]) -> String {
     row.iter()
         .enumerate()
         .map(|(i, val)| format!("{}:{};", i + 1, val))
         .collect()
+}
+
+/// 根据字段类型获取识别规则
+fn get_field_type_rules(field_type: &str) -> &'static str {
+    match field_type {
+        "company" => "数据应含\"有限公司\"、\"有限责任公司\"、\"股份公司\"、\"集团\"、Inc、Ltd、Corp、Co.、LLC等企业实体标识；列名含\"客户\"、\"卖家\"但数据为纯数字/纯字母编号时，是ID列而非公司名，不得映射。\n    ⚠️ 严禁映射：纯数字列（如ID、编号、订单号等）绝不能映射为公司名称，即使列名含有\"客户\"或\"卖家\"等词语",
+        "phone" => "数据应为11位手机号（1开头）或固话格式（区号-号码），纯数字但不符合手机/固话格式的不得映射",
+        "email" => "数据必须包含@符号，格式为 xxx@xxx.xxx",
+        "name" => "数据通常为2-4个中文字符或英文人名；若数据含\"公司\"、\"有限\"、\"集团\"等词则为企业名，不得映射为姓名",
+        "address" => "数据应包含省/市/区/路/街/号/楼等地址成分；单纯的城市名或省份名不是完整地址",
+        "date" => "数据应为日期格式如 YYYY-MM-DD、YYYY/MM/DD、MM/DD/YYYY 等；纯数字时间戳不是日期",
+        "number" => "数据应为纯数字、整数或小数；含字母或特殊符号的编号不是数字字段",
+        "id_card" => "数据应为15位纯数字或18位（前17位数字+最后1位数字或X）的身份证号格式",
+        "url" => "数据必须以 http:// 或 https:// 开头",
+        "text" => "通用文本字段，列名语义匹配即可，但不应映射已被其他类型明确拒绝的列",
+        _ => "根据列名语义和样本数据内容综合判断"
+    }
 }
 use tauri::{AppHandle, Emitter};
 use tokio::sync::RwLock;
@@ -71,6 +90,15 @@ pub struct ProcessingEvent {
     pub confidence: Option<f32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub mappings: Option<HashMap<String, String>>,
+    /// Sheet 级别的成功计数（sheet_complete 事件）
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sheet_success_count: Option<i32>,
+    /// Sheet 级别的错误计数（sheet_complete 事件）
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sheet_error_count: Option<i32>,
+    /// Sheet 级别的总行数（sheet_complete 事件）
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sheet_total_rows: Option<i32>,
 }
 
 impl ProcessingEvent {
@@ -150,6 +178,24 @@ fn clean_value(value: &str, field_type: &str) -> String {
                 .chars()
                 .filter(|c| c.is_ascii_digit() || *c == '+')
                 .collect();
+        }
+        "company" => {
+            // 公司名称：压缩空白；若清理后为纯数字（如 ID、编号），视为无效值返回空
+            let mut result = String::new();
+            let mut prev_space = false;
+            for c in cleaned.chars() {
+                if c.is_whitespace() {
+                    if !prev_space { result.push(' '); prev_space = true; }
+                } else {
+                    result.push(c);
+                    prev_space = false;
+                }
+            }
+            cleaned = result.trim().to_string();
+            // 纯数字（含空格分隔）不是公司名称，清空
+            if !cleaned.is_empty() && cleaned.chars().all(|c| c.is_ascii_digit() || c.is_whitespace()) {
+                cleaned = String::new();
+            }
         }
         "email" => {
             // 邮箱：去除所有空格，转小写
@@ -441,6 +487,22 @@ async fn process_files(
             ..Default::default()
         }.emit(&app);
 
+        // 持久化：创建文件进度记录
+        let _ = upsert_file_progress(
+            &db,
+            task_id,
+            &file_name,
+            None,  // sheet_name 为空表示文件级别
+            Some("processing"),
+            None,  // sheet_phase
+            None,  // ai_confidence
+            None,  // mapping_count
+            None,  // success_count
+            None,  // error_count
+            None,  // total_rows
+            None,  // error_message
+        ).await;
+
         // 处理文件
         let result = process_single_file(
             &app,
@@ -465,9 +527,42 @@ async fn process_files(
                 processed_rows += rows;
                 success_count += success;
                 error_count += errors;
+
+                // 持久化：更新文件完成状态
+                let _ = upsert_file_progress(
+                    &db,
+                    task_id,
+                    &file_name,
+                    None,
+                    Some("done"),
+                    None,  // sheet_phase
+                    None,  // ai_confidence
+                    None,  // mapping_count
+                    Some(success),
+                    Some(errors),
+                    Some(rows),
+                    None,  // error_message
+                ).await;
             }
             Err(e) => {
                 error_count += 1;
+
+                // 持久化：更新文件错误状态
+                let _ = upsert_file_progress(
+                    &db,
+                    task_id,
+                    &file_name,
+                    None,
+                    Some("error"),
+                    None,  // sheet_phase
+                    None,  // ai_confidence
+                    None,  // mapping_count
+                    None,  // success_count
+                    None,  // error_count
+                    None,  // total_rows
+                    Some(&e),
+                ).await;
+
                 ProcessingEvent {
                     event: "error".to_string(),
                     task_id: task_id.to_string(),
@@ -562,6 +657,11 @@ async fn process_single_file(
             return Ok((total_rows, success_count, error_count));
         }
 
+        // 记录 Sheet 开始时的基线值（用于计算当前 Sheet 的增量）
+        let sheet_start_total = total_rows;
+        let sheet_start_success = success_count;
+        let sheet_start_error = error_count;
+
         // 发送 Sheet 开始事件
         ProcessingEvent {
             event: "sheet_start".to_string(),
@@ -572,13 +672,65 @@ async fn process_single_file(
             ..Default::default()
         }.emit(app);
 
+        // 持久化：创建 Sheet 进度记录
+        let _ = upsert_file_progress(
+            db,
+            task_id,
+            file_name,
+            Some(&sheet_name),
+            None,  // file_phase 不变
+            Some("ai_analyzing"),
+            None,  // ai_confidence
+            None,  // mapping_count
+            None,  // success_count
+            None,  // error_count
+            None,  // total_rows
+            None,  // error_message
+        ).await;
+
         // 获取已读取的 Sheet 数据
         let rows_data = match all_rows.remove(&sheet_name) {
             Some(rows) => rows,
-            None => continue,
+            None => {
+                // Sheet 数据不存在，标记为完成（0 行）
+                let _ = upsert_file_progress(
+                    db, task_id, file_name, Some(&sheet_name),
+                    None, Some("done"), None, None,
+                    Some(0), Some(0), Some(0), None,
+                ).await;
+                ProcessingEvent {
+                    event: "sheet_complete".to_string(),
+                    task_id: task_id.to_string(),
+                    current_file: Some(file_name.to_string()),
+                    current_sheet: Some(sheet_name.clone()),
+                    sheet_success_count: Some(0),
+                    sheet_error_count: Some(0),
+                    sheet_total_rows: Some(0),
+                    message: Some(format!("Sheet {} 无数据", sheet_name)),
+                    ..Default::default()
+                }.emit(app);
+                continue;
+            }
         };
 
         if rows_data.is_empty() {
+            // Sheet 为空，标记为完成（0 行）
+            let _ = upsert_file_progress(
+                db, task_id, file_name, Some(&sheet_name),
+                None, Some("done"), None, None,
+                Some(0), Some(0), Some(0), None,
+            ).await;
+            ProcessingEvent {
+                event: "sheet_complete".to_string(),
+                task_id: task_id.to_string(),
+                current_file: Some(file_name.to_string()),
+                current_sheet: Some(sheet_name.clone()),
+                sheet_success_count: Some(0),
+                sheet_error_count: Some(0),
+                sheet_total_rows: Some(0),
+                message: Some(format!("Sheet {} 无数据，跳过", sheet_name)),
+                ..Default::default()
+            }.emit(app);
             continue;
         }
 
@@ -597,6 +749,7 @@ async fn process_single_file(
             field_label: f.field_label.clone(),
             field_type: f.field_type.clone(),
             additional_requirement: f.additional_requirement.clone(),
+            extraction_hint: f.extraction_hint.clone(),
         }).collect();
 
         // AI 分析（流式）
@@ -604,8 +757,8 @@ async fn process_single_file(
         let task_id_clone = task_id.to_string();
         let sheet_name_clone = sheet_name.clone();
 
-        // 构建请求提示（用于显示）
-        let request_preview = build_request_preview(&rows_data[0], &field_defs, rows_data.get(1..11).map(|r| r.to_vec()));
+        // 构建请求提示（用于显示）- 只取前 5 行样本数据
+        let request_preview = build_request_preview(&rows_data[0], &field_defs, rows_data.get(1..6).map(|r| r.to_vec()));
         ProcessingEvent {
             event: "ai_request".to_string(),
             task_id: task_id.to_string(),
@@ -623,7 +776,7 @@ async fn process_single_file(
             max_tokens,
             &rows_data[0],
             &field_defs,
-            rows_data.get(1..11).map(|r| r.to_vec()),
+            rows_data.get(1..6).map(|r| r.to_vec()),  // 只取前 5 行样本数据
             task_id_clone,
             sheet_name_clone,
         ).await?;
@@ -642,6 +795,22 @@ async fn process_single_file(
             message: Some(format!("列映射完成 (置信度: {:.0}%)", mapping_result.confidence * 100.0)),
             ..Default::default()
         }.emit(app);
+
+        // 持久化：更新 AI 置信度和映射数
+        let _ = upsert_file_progress(
+            db,
+            task_id,
+            file_name,
+            Some(&sheet_name),
+            None,  // file_phase
+            Some("importing"),
+            Some(mapping_result.confidence),
+            Some(mapping_result.mappings.len() as i32),
+            None,  // success_count
+            None,  // error_count
+            None,  // total_rows
+            None,  // error_message
+        ).await;
 
         // 创建字段 ID 到索引的映射（预留用于未来优化）
         let _field_id_to_idx: HashMap<i32, usize> = fields.iter()
@@ -775,12 +944,37 @@ async fn process_single_file(
             }
         }
 
-        // Sheet 完成
+        // Sheet 完成时计算当前 Sheet 的增量值
+        let sheet_success = success_count - sheet_start_success;  // 当前 Sheet 的成功数（增量）
+        let sheet_error = error_count - sheet_start_error;        // 当前 Sheet 的错误数（增量）
+        let sheet_total = total_rows - sheet_start_total;         // 当前 Sheet 的总行数（增量）
+
+        // 持久化：更新 Sheet 完成状态和统计
+        let _ = upsert_file_progress(
+            db,
+            task_id,
+            file_name,
+            Some(&sheet_name),
+            None,  // file_phase
+            Some("done"),
+            None,  // ai_confidence
+            None,  // mapping_count
+            Some(sheet_success),
+            Some(sheet_error),
+            Some(sheet_total),
+            None,  // error_message
+        ).await;
+
+        // Sheet 完成 - 添加 sheet 级别统计字段
         ProcessingEvent {
             event: "sheet_complete".to_string(),
             task_id: task_id.to_string(),
+            current_file: Some(file_name.to_string()),
             current_sheet: Some(sheet_name.clone()),
-            message: Some(format!("Sheet {} 处理完成", sheet_name)),
+            sheet_success_count: Some(sheet_success),
+            sheet_error_count: Some(sheet_error),
+            sheet_total_rows: Some(sheet_total),
+            message: Some(format!("Sheet {} 处理完成: 成功 {} 行, 失败 {} 行", sheet_name, sheet_success, sheet_error)),
             ..Default::default()
         }.emit(app);
     }
@@ -835,56 +1029,86 @@ async fn analyze_columns_with_ai_stream(
     task_id: String,
     sheet_name: String,
 ) -> Result<super::ai_service::ColumnMappingResponse, String> {
-    let system_prompt = r#"你是一个数据处理专家，负责分析 Excel 表格的列与目标字段的映射关系。
+    let system_prompt = r#"你是专业的 Excel 数据结构分析专家，负责将 Excel 列精准映射到目标字段。
 
-任务：
-1. 识别表头所在行（通常是第一行包含字段名的行）
-2. 分析每一列与目标字段的匹配关系
-3. 返回 JSON 格式的映射结果
+## 核心原则：两步验证（缺一不可）
 
-返回格式（必须严格遵循）：
+### 第一步：列名语义匹配
+表头/列名在语义上是否对应目标字段。
+
+### 第二步：数据内容验证（最重要）
+逐列检查样本数据，验证实际内容是否符合字段类型的数据特征：
+
+| 字段类型 | 数据内容必须满足 | 常见误判陷阱 |
+|---------|----------------|------------|
+| company | 含"有限公司"、"集团"、Inc、Ltd、Corp 等文字 | ❌ 纯数字/纯字母编号列名含"客户"→ID列，不是公司名 |
+| phone   | 11位手机号或固话格式 | ❌ 含字母的编号不是电话 |
+| email   | 包含 @ 符号 | ❌ 没有@的字符串不是邮箱 |
+| name    | 2-4个中文字符或英文人名 | ❌ 含"公司"/"集团"的是企业名不是姓名 |
+| address | 含省/市/区/路/号/街道等 | ❌ 纯城市名不是完整地址 |
+| date    | YYYY-MM-DD 等日期格式 | ❌ 纯数字时间戳不是日期 |
+| number  | 纯数字或小数 | ❌ 含字母的编号不是数字字段 |
+| id_card | 15或18位含字母X的身份证格式 | ❌ 普通15位数字不是身份证 |
+| url     | 以 http:// 或 https:// 开头 | ❌ 没有协议前缀不是URL |
+| text    | 通用文本，列名语义匹配即可 | — |
+
+## 决策规则
+- ✅ 两步均匹配 → 建立映射，confidence 反映确定程度
+- ❌ 任意一步不匹配 → 放入 unmatched_columns，**宁缺毋滥**
+
+## 返回格式（严格 JSON）
 {
   "header_row": 0,
   "mappings": [
-    {"field_name": "目标字段名", "column_index": 0, "column_header": "Excel表头", "confidence": 0.95}
+    {"field_name": "字段名", "column_index": 0, "column_header": "Excel列名", "confidence": 0.95}
   ],
   "confidence": 0.9,
-  "unmatched_columns": []
+  "unmatched_columns": [1, 3]
 }
 
-注意：
-- header_row 从 0 开始计数，-1 表示没有表头
-- column_index 从 0 开始（与"Excel 表头"中的 [0],[1],... 编号对应）
-- 样本数据中列编号从 1 开始（如 1:值;2:值;），这是显示格式，与 column_index 差 1
-- confidence 范围 0-1，表示匹配置信度
-- 如果某列无法匹配任何目标字段，放入 unmatched_columns"#;
+header_row 和 column_index 均从 0 计数；-1 表示无表头"#;
 
+    // 列维度展示：表头 + 该列的样本值（方便 AI 逐列验证数据内容）
     let mut user_prompt = String::new();
-    user_prompt.push_str("Excel 表头（按顺序）：\n");
-    for (i, header) in headers.iter().enumerate() {
-        user_prompt.push_str(&format!("  [{}] {}\n", i, header));
-    }
-
-    user_prompt.push_str("\n目标字段定义：\n");
-    for field in field_defs {
-        let extra = field.additional_requirement
+    user_prompt.push_str("## Excel 列数据预览（列名 → 样本值）\n\n");
+    for (col_idx, header) in headers.iter().enumerate() {
+        let col_samples: Vec<&str> = sample_rows
             .as_ref()
-            .map(|r| format!(" ({})", r))
+            .map(|rows| {
+                rows.iter()
+                    .filter_map(|row| row.get(col_idx).map(|s| s.as_str()))
+                    .filter(|s| !s.trim().is_empty())
+                    .take(5)
+                    .collect()
+            })
             .unwrap_or_default();
-        user_prompt.push_str(&format!(
-            "  - {} [{}]{}: {}\n",
-            field.field_name, field.field_type, extra, field.field_label
-        ));
-    }
-
-    if let Some(rows) = sample_rows {
-        user_prompt.push_str("\n样本数据（前几行，列编号从1开始）：\n");
-        for (i, row) in rows.iter().enumerate() {
-            user_prompt.push_str(&format!("  行 {}: {}\n", i, format_row_indexed(row)));
+        if col_samples.is_empty() {
+            user_prompt.push_str(&format!("列[{}] \"{}\"  →  (空列)\n", col_idx, header));
+        } else {
+            user_prompt.push_str(&format!("列[{}] \"{}\"  →  {}\n", col_idx, header, col_samples.join(" | ")));
         }
     }
 
-    user_prompt.push_str("\n请分析列映射关系并返回 JSON 结果。");
+    // 目标字段定义
+    user_prompt.push_str("\n## 目标字段定义\n\n");
+    for field in field_defs {
+        let type_rules = get_field_type_rules(&field.field_type);
+        let extra = field.additional_requirement
+            .as_ref()
+            .map(|r| format!("（{}）", r))
+            .unwrap_or_default();
+        let extraction = field.extraction_hint
+            .as_ref()
+            .map(|h| format!("\n  提取要求: {}", h))
+            .unwrap_or_default();
+        user_prompt.push_str(&format!(
+            "- {} [{}]{}: {}\n  数据特征: {}{}\n",
+            field.field_name, field.field_type, extra, field.field_label, type_rules, extraction
+        ));
+    }
+
+    user_prompt.push_str("\n## 任务\n对每一列执行两步验证（列名语义 + 数据内容），输出 JSON 映射结果。");
+
 
     // 使用流式调用，每个 chunk 发送事件
     let app_for_stream = app.clone();
@@ -920,6 +1144,38 @@ async fn analyze_columns_with_ai_stream(
 
     let header_row = parsed["header_row"].as_i64().unwrap_or(0) as i32;
     let confidence = parsed["confidence"].as_f64().unwrap_or(0.8) as f32;
+
+    // 写入 AI 调试日志（写到系统临时目录，避免触发 Tauri 文件监听）
+    {
+        use std::io::Write;
+        let log_path = std::env::temp_dir().join("redata_ai_debug.log");
+        let mappings_summary = parsed["mappings"]
+            .as_array()
+            .map(|arr| {
+                arr.iter()
+                    .map(|m| format!(
+                        "  {} -> col[{}] \"{}\" ({:.0}%)",
+                        m["field_name"].as_str().unwrap_or("?"),
+                        m["column_index"].as_i64().unwrap_or(-1),
+                        m["column_header"].as_str().unwrap_or(""),
+                        m["confidence"].as_f64().unwrap_or(0.0) * 100.0
+                    ))
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            })
+            .unwrap_or_default();
+        let entry = format!(
+            "\n====== AI 列映射日志 [Sheet: {}] ======\n\
+            ## 请求\n{}\n\n\
+            ## AI 原始响应\n{}\n\n\
+            ## 解析结果 (header_row={}, confidence={:.0}%)\n{}\n\
+            ==========================================\n",
+            sheet_name, user_prompt, response, header_row, confidence * 100.0, mappings_summary
+        );
+        if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(&log_path) {
+            let _ = f.write_all(entry.as_bytes());
+        }
+    }
 
     let mappings: Vec<super::ai_service::FieldMapping> = parsed["mappings"]
         .as_array()

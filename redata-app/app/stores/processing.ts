@@ -3,6 +3,7 @@ import { ref, computed } from 'vue'
 import type {
   TaskProgress, FileProgress, SheetProgress,
   ProcessingProgress, TaskPhase, FilePhase, SheetPhase,
+  FullTaskProgressResponse,
 } from '~/types'
 import { processingApi } from '~/utils/api'
 
@@ -47,7 +48,9 @@ export const useProcessingStore = defineStore('processing', () => {
     const idx = task.files.findIndex(f => f.fileName === fileName)
     if (idx === -1) return
     const newFiles = [...task.files]
-    newFiles[idx] = updater({ ...newFiles[idx] })
+    const existingFile = newFiles[idx]
+    if (!existingFile) return
+    newFiles[idx] = updater({ ...existingFile })
     setTask({ ...task, files: newFiles })
   }
 
@@ -62,10 +65,13 @@ export const useProcessingStore = defineStore('processing', () => {
     const fileIdx = task.files.findIndex(f => f.fileName === fileName)
     if (fileIdx === -1) return
     const file = task.files[fileIdx]
+    if (!file) return
     const sheetIdx = file.sheets.findIndex(s => s.sheetName === sheetName)
     if (sheetIdx === -1) return
     const newSheets = [...file.sheets]
-    newSheets[sheetIdx] = updater({ ...newSheets[sheetIdx] })
+    const existingSheet = newSheets[sheetIdx]
+    if (!existingSheet) return
+    newSheets[sheetIdx] = updater({ ...existingSheet })
     const newFiles = [...task.files]
     newFiles[fileIdx] = { ...file, sheets: newSheets }
     setTask({ ...task, files: newFiles })
@@ -87,6 +93,7 @@ export const useProcessingStore = defineStore('processing', () => {
       completed: 'completed',
       cancelled: 'cancelled',
       error: 'error',
+      interrupted: 'interrupted',
     }
     return map[status] ?? 'processing'
   }
@@ -106,7 +113,7 @@ export const useProcessingStore = defineStore('processing', () => {
     tasks.value.filter(t => t.phase === 'processing' || t.phase === 'paused'),
   )
   const completedTasks = computed(() =>
-    tasks.value.filter(t => ['completed', 'cancelled', 'error'].includes(t.phase)),
+    tasks.value.filter(t => ['completed', 'cancelled', 'error', 'interrupted'].includes(t.phase)),
   )
   const hasActiveTasks = computed(() => activeTasks.value.length > 0)
   const selectedTask = computed(() =>
@@ -117,6 +124,39 @@ export const useProcessingStore = defineStore('processing', () => {
 
   function selectTask(taskId: string | null) {
     selectedTaskId.value = taskId
+  }
+
+  // 从后端响应构建完整的 FileProgress 数组
+  function buildFilesFromProgressResponse(response: FullTaskProgressResponse): FileProgress[] {
+    return response.files.map(file => ({
+      fileName: file.file_name,
+      phase: file.file_phase as FilePhase,
+      sheets: file.sheets.map(sheet => ({
+        sheetName: sheet.sheet_name,
+        phase: sheet.sheet_phase as SheetPhase,
+        aiConfidence: sheet.ai_confidence,
+        mappingCount: sheet.mapping_count,
+        errorMessage: sheet.error_message,
+        successCount: sheet.success_count,
+        errorCount: sheet.error_count,
+        totalRows: sheet.total_rows,
+      })),
+      totalRows: file.total_rows,
+      successCount: file.success_count,
+      errorCount: file.error_count,
+    }))
+  }
+
+  // 获取任务完整进度（从数据库恢复）
+  async function fetchTaskFullProgress(taskId: string): Promise<FileProgress[] | null> {
+    try {
+      const response = await processingApi.getFullProgress(taskId)
+      return buildFilesFromProgressResponse(response)
+    }
+    catch (e) {
+      console.error('[Processing] Failed to fetch full progress:', e)
+      return null
+    }
   }
 
   async function fetchTasks(projectId: number) {
@@ -136,7 +176,8 @@ export const useProcessingStore = defineStore('processing', () => {
       const ids: string[] = []
 
       for (const task of response.tasks) {
-        const taskProgress: TaskProgress = {
+        // 基础任务进度
+        let taskProgress: TaskProgress = {
           taskId: task.task_id,
           projectId: task.project_id,
           batchNumber: task.batch_number,
@@ -157,6 +198,18 @@ export const useProcessingStore = defineStore('processing', () => {
           startedAt: task.started_at || new Date().toISOString(),
           completedAt: task.status === 'completed' ? new Date().toISOString() : null,
         }
+
+        // 对于非 pending 状态的任务，尝试从数据库恢复详细进度
+        if (task.status !== 'pending') {
+          const fullFiles = await fetchTaskFullProgress(task.task_id)
+          if (fullFiles && fullFiles.length > 0) {
+            taskProgress = {
+              ...taskProgress,
+              files: fullFiles,
+            }
+          }
+        }
+
         newMap.set(task.task_id, taskProgress)
         ids.push(task.task_id)
       }
@@ -256,6 +309,34 @@ export const useProcessingStore = defineStore('processing', () => {
     }
   }
 
+  async function resetTask(taskId: string, deleteRecords: boolean) {
+    try {
+      const result = await processingApi.reset(taskId, deleteRecords)
+      // 重置任务状态到初始状态
+      updateTask(taskId, task => ({
+        ...task,
+        phase: 'starting',
+        files: task.files.map(f => ({
+          ...f,
+          phase: 'waiting' as FilePhase,
+          sheets: [],
+          totalRows: 0,
+          successCount: 0,
+          errorCount: 0,
+        })),
+        totalRows: 0,
+        processedRows: 0,
+        successCount: 0,
+        errorCount: 0,
+      }))
+      return result
+    }
+    catch (e: any) {
+      error.value = e.message
+      throw e
+    }
+  }
+
   // ── 进度事件处理 ──────────────────────────────────────────────────────────────
 
   function handleProgressEvent(data: ProcessingProgress) {
@@ -308,6 +389,7 @@ export const useProcessingStore = defineStore('processing', () => {
         const fileIdx = task.files.findIndex(f => f.fileName === fileName)
         if (fileIdx === -1) break
         const file = task.files[fileIdx]
+        if (!file) break
         const existingSheetIdx = file.sheets.findIndex(s => s.sheetName === sheetName)
 
         if (existingSheetIdx !== -1) {
@@ -322,6 +404,9 @@ export const useProcessingStore = defineStore('processing', () => {
               aiConfidence: null,
               mappingCount: null,
               errorMessage: null,
+              successCount: 0,
+              errorCount: 0,
+              totalRows: 0,
             }],
           }))
         }
@@ -370,7 +455,13 @@ export const useProcessingStore = defineStore('processing', () => {
         const sheetName = data.current_sheet!
         const loc = activeLocation.value.get(taskId)
         if (!loc) break
-        updateSheet(taskId, loc.file, sheetName, s => ({ ...s, phase: 'done' }))
+        updateSheet(taskId, loc.file, sheetName, s => ({
+          ...s,
+          phase: 'done',
+          successCount: data.sheet_success_count ?? s.successCount,
+          errorCount: data.sheet_error_count ?? s.errorCount,
+          totalRows: data.sheet_total_rows ?? s.totalRows,
+        }))
         break
       }
 
@@ -412,7 +503,14 @@ export const useProcessingStore = defineStore('processing', () => {
           files: t.files.map(f => ({
             ...f,
             phase: 'done' as FilePhase,
-            sheets: f.sheets.map(s => ({ ...s, phase: 'done' as SheetPhase })),
+            sheets: f.sheets.map(s => ({
+              ...s,
+              phase: 'done' as SheetPhase,
+              // 保留已有的统计数据
+              successCount: s.successCount,
+              errorCount: s.errorCount,
+              totalRows: s.totalRows,
+            })),
           })),
         }))
         break
@@ -525,6 +623,7 @@ export const useProcessingStore = defineStore('processing', () => {
     pauseTask,
     resumeTask,
     cancelTask,
+    resetTask,
     clearError,
     // 事件监听
     startEventListener,

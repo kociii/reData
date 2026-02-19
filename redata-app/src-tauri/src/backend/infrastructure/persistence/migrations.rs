@@ -30,6 +30,9 @@ pub async fn run_migrations(db: &DatabaseConnection) -> Result<(), DbErr> {
     // v0.1.1 迁移：添加 source_files 列到任务表
     add_source_files_column(db).await?;
 
+    // v0.1.2 迁移：创建任务文件进度表
+    create_task_file_progress_table(db).await?;
+
     tracing::info!("Database migrations completed");
 
     Ok(())
@@ -279,5 +282,50 @@ async fn add_source_files_column(db: &DatabaseConnection) -> Result<(), DbErr> {
         tracing::info!("Added source_files column to processing_tasks table");
     }
 
+    Ok(())
+}
+
+/// v0.1.2 迁移：创建任务文件进度表
+async fn create_task_file_progress_table(db: &DatabaseConnection) -> Result<(), DbErr> {
+    let sql = r#"
+        CREATE TABLE IF NOT EXISTS task_file_progress (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            task_id TEXT NOT NULL,
+            file_name TEXT NOT NULL,
+            file_phase TEXT NOT NULL DEFAULT 'waiting',
+            sheet_name TEXT,
+            sheet_phase TEXT,
+            ai_confidence REAL,
+            mapping_count INTEGER,
+            success_count INTEGER NOT NULL DEFAULT 0,
+            error_count INTEGER NOT NULL DEFAULT 0,
+            total_rows INTEGER NOT NULL DEFAULT 0,
+            error_message TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT,
+            FOREIGN KEY (task_id) REFERENCES processing_tasks(id) ON DELETE CASCADE
+        )
+    "#;
+
+    db.execute(Statement::from_string(
+        db.get_database_backend(),
+        sql.to_string(),
+    ))
+    .await?;
+
+    // 创建索引
+    db.execute(Statement::from_string(
+        db.get_database_backend(),
+        "CREATE INDEX IF NOT EXISTS idx_tfp_task ON task_file_progress(task_id)".to_string(),
+    ))
+    .await?;
+
+    db.execute(Statement::from_string(
+        db.get_database_backend(),
+        "CREATE INDEX IF NOT EXISTS idx_tfp_file ON task_file_progress(task_id, file_name)".to_string(),
+    ))
+    .await?;
+
+    tracing::info!("Created task_file_progress table");
     Ok(())
 }

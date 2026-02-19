@@ -3,6 +3,18 @@
 // 从 ai_service.rs 提取，供 ai_service.rs 和 processing.rs 共用
 
 use futures_util::StreamExt;
+use std::sync::LazyLock;
+use std::time::Duration;
+
+/// 单例 HTTP 客户端（连接池复用，减少 TLS 握手开销）
+static HTTP_CLIENT: LazyLock<reqwest::Client> = LazyLock::new(|| {
+    reqwest::Client::builder()
+        .timeout(Duration::from_secs(30))
+        .pool_idle_timeout(Duration::from_secs(30))
+        .pool_max_idle_per_host(10)
+        .build()
+        .expect("Failed to create HTTP client")
+});
 
 /// 调用 AI API（OpenAI 兼容接口，支持阿里云结构化输出）
 ///
@@ -20,7 +32,6 @@ pub async fn call_ai(
     max_tokens: i32,
     json_mode: bool,
 ) -> Result<String, String> {
-    let client = reqwest::Client::new();
     let url = format!("{}/chat/completions", api_url.trim_end_matches('/'));
 
     // 构建请求体
@@ -39,12 +50,11 @@ pub async fn call_ai(
         body["response_format"] = serde_json::json!({"type": "json_object"});
     }
 
-    let response = client
+    let response = HTTP_CLIENT
         .post(&url)
         .header("Authorization", format!("Bearer {}", api_key))
         .header("Content-Type", "application/json")
         .json(&body)
-        .timeout(std::time::Duration::from_secs(120))
         .send()
         .await
         .map_err(|e| format!("AI API 请求失败: {}", e))?;
@@ -87,7 +97,6 @@ pub async fn call_ai_stream<F>(
 where
     F: FnMut(&str) + Send,
 {
-    let client = reqwest::Client::new();
     let url = format!("{}/chat/completions", api_url.trim_end_matches('/'));
 
     // 构建请求体
@@ -107,12 +116,11 @@ where
         body["response_format"] = serde_json::json!({"type": "json_object"});
     }
 
-    let response = client
+    let response = HTTP_CLIENT
         .post(&url)
         .header("Authorization", format!("Bearer {}", api_key))
         .header("Content-Type", "application/json")
         .json(&body)
-        .timeout(std::time::Duration::from_secs(120))
         .send()
         .await
         .map_err(|e| format!("AI API 请求失败: {}", e))?;

@@ -1,5 +1,5 @@
 <template>
-  <div>
+  <div class="h-full overflow-auto p-6">
     <!-- 页面标题 -->
     <div class="mb-6">
       <h1 class="text-2xl font-bold text-highlighted">设置</h1>

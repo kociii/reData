@@ -22,6 +22,7 @@ import type {
   Batch,
   ListTasksResponse,
   ProcessingProgress,
+  FullTaskProgressResponse,
 } from '~/types'
 
 // 使用 Tauri Commands 模式（零网络开销）
@@ -421,6 +422,25 @@ export const processingApi = {
     return request<{ tasks: ProcessingTask[]; total: number }>(
       `/processing/list/${projectId}?${params.toString()}`
     )
+  },
+
+  // 获取任务完整进度（文件和 Sheet 级别）
+  getFullProgress: async (taskId: string): Promise<FullTaskProgressResponse> => {
+    if (USE_TAURI_COMMANDS) {
+      return await invoke<FullTaskProgressResponse>('get_task_full_progress', { taskId })
+    }
+    return request<FullTaskProgressResponse>(`/processing/full-progress/${taskId}`)
+  },
+
+  // 重置任务（可选删除已导入记录）
+  reset: async (taskId: string, deleteRecords: boolean): Promise<ProcessingTask> => {
+    if (USE_TAURI_COMMANDS) {
+      return await invoke<ProcessingTask>('reset_processing_task', { taskId, deleteRecords })
+    }
+    return request<ProcessingTask>(`/processing/reset/${taskId}`, {
+      method: 'POST',
+      body: JSON.stringify({ delete_records: deleteRecords }),
+    })
   },
 
   // 监听进度事件（Tauri 模式）

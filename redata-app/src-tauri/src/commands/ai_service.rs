@@ -30,6 +30,8 @@ pub struct FieldDefinition {
     pub field_label: String,
     pub field_type: String,
     pub additional_requirement: Option<String>,
+    /// AI 提取要求（用户自定义）
+    pub extraction_hint: Option<String>,
 }
 
 /// 列映射分析结果
@@ -73,7 +75,7 @@ pub async fn analyze_column_mapping(
         .map_err(|e| format!("解密失败: {}", e))?;
 
     // 构建 AI 请求
-    let system_prompt = build_system_prompt();
+    let system_prompt = build_system_prompt(&field_definitions);
     let user_prompt = build_user_prompt(&sheet_headers, &field_definitions, &sample_rows);
 
     // 调用 AI（启用 JSON 模式，确保结构化输出）
@@ -178,30 +180,62 @@ fn get_builtin_validation_rule(field_type: &str) -> Option<String> {
 
 // ============ 辅助函数 ============
 
-/// 构建系统提示
-fn build_system_prompt() -> &'static str {
-    r#"你是一个数据处理专家，负责分析 Excel 表格的列与目标字段的映射关系。
+/// 构建系统提示（根据实际字段类型动态生成规则表）
+fn build_system_prompt(field_definitions: &[FieldDefinition]) -> String {
+    // 收集实际使用的字段类型（去重）
+    let used_types: std::collections::HashSet<&str> = field_definitions
+        .iter()
+        .map(|f| f.field_type.as_str())
+        .collect();
 
-任务：
-1. 识别表头所在行（通常是第一行包含字段名的行）
-2. 分析每一列与目标字段的匹配关系
-3. 返回 JSON 格式的映射结果
+    let mut prompt = String::from(
+        "你是专业的 Excel 数据结构分析专家，负责将 Excel 列精准映射到目标字段。\n\n\
+         ## 核心原则：两步验证（缺一不可）\n\n\
+         ### 第一步：列名语义匹配\n\
+         表头/列名在语义上是否对应目标字段。\n\n\
+         ### 第二步：数据内容验证（最重要）\n\
+         逐列检查样本数据，验证实际内容是否符合字段类型的数据特征：\n\n\
+         | 字段类型 | 数据内容必须满足 | 常见误判陷阱 |\n\
+         |---------|----------------|------------|\n",
+    );
 
-返回格式（必须严格遵循）：
-{
-  "header_row": 0,
-  "mappings": [
-    {"field_name": "目标字段名", "column_index": 0, "column_header": "Excel表头", "confidence": 0.95}
-  ],
-  "confidence": 0.9,
-  "unmatched_columns": []
-}
+    // 类型规则表（按顺序，仅输出实际用到的类型）
+    const TYPE_RULE_TABLE: &[(&str, &str, &str)] = &[
+        ("company", "含\"有限公司\"、\"集团\"、Inc、Ltd、Corp 等文字", "❌ 纯数字/纯字母编号列名含\"客户\"→ID列，不是公司名"),
+        ("phone",   "11位手机号或固话格式",                            "❌ 含字母的编号不是电话"),
+        ("email",   "包含 @ 符号",                                    "❌ 没有@的字符串不是邮箱"),
+        ("name",    "2-4个中文字符或英文人名",                          "❌ 含\"公司\"/\"集团\"的是企业名不是姓名"),
+        ("address", "含省/市/区/路/号/街道等",                          "❌ 纯城市名不是完整地址"),
+        ("date",    "YYYY-MM-DD 等日期格式",                           "❌ 纯数字时间戳不是日期"),
+        ("number",  "纯数字或小数",                                    "❌ 含字母的编号不是数字字段"),
+        ("id_card", "15或18位含字母X的身份证格式",                       "❌ 普通15位数字不是身份证"),
+        ("url",     "以 http:// 或 https:// 开头",                    "❌ 没有协议前缀不是URL"),
+        ("text",    "通用文本，列名语义匹配 + 满足字段定义中的识别条件",    "—"),
+    ];
 
-注意：
-- header_row 从 0 开始计数，-1 表示没有表头
-- column_index 从 0 开始
-- confidence 范围 0-1，表示匹配置信度
-- 如果某列无法匹配任何目标字段，放入 unmatched_columns"#
+    for &(type_name, must_satisfy, trap) in TYPE_RULE_TABLE {
+        if used_types.contains(type_name) {
+            prompt.push_str(&format!("| {} | {} | {} |\n", type_name, must_satisfy, trap));
+        }
+    }
+
+    prompt.push_str(
+        "\n## 决策规则\n\
+         - ✅ 两步均匹配 → 建立映射，confidence 反映确定程度\n\
+         - ❌ 任意一步不匹配 → 放入 unmatched_columns，**宁缺毋滥**\n\n\
+         ## 返回格式（严格 JSON）\n\
+         {\n\
+           \"header_row\": 0,\n\
+           \"mappings\": [\n\
+             {\"field_name\": \"字段名\", \"column_index\": 0, \"column_header\": \"Excel列名\", \"confidence\": 0.95}\n\
+           ],\n\
+           \"confidence\": 0.9,\n\
+           \"unmatched_columns\": [1, 3]\n\
+         }\n\n\
+         header_row 和 column_index 均从 0 计数；-1 表示无表头",
+    );
+
+    prompt
 }
 
 /// 构建用户提示
@@ -212,32 +246,68 @@ fn build_user_prompt(
 ) -> String {
     let mut prompt = String::new();
 
-    prompt.push_str("Excel 表头（按顺序）：\n");
-    for (i, header) in sheet_headers.iter().enumerate() {
-        prompt.push_str(&format!("  [{}] {}\n", i, header));
-    }
-
-    prompt.push_str("\n目标字段定义：\n");
-    for field in field_definitions {
-        let extra = field.additional_requirement
-            .as_ref()
-            .map(|r| format!(" ({})", r))
-            .unwrap_or_default();
-        prompt.push_str(&format!(
-            "  - {} [{}]{}: {}\n",
-            field.field_name, field.field_type, extra, field.field_label
-        ));
-    }
-
-    if let Some(rows) = sample_rows {
-        prompt.push_str("\n样本数据（前几行）：\n");
-        for (i, row) in rows.iter().enumerate() {
-            prompt.push_str(&format!("  行 {}: {}\n", i, row.join(" | ")));
+    // 列维度展示：表头 + 该列的样本值（方便 AI 逐列验证数据内容）
+    prompt.push_str("## Excel 列数据预览（列名 → 样本值）\n\n");
+    for (col_idx, header) in sheet_headers.iter().enumerate() {
+        let samples: Vec<&str> = if let Some(rows) = sample_rows {
+            rows.iter()
+                .filter_map(|row| row.get(col_idx).map(|s| s.as_str()))
+                .filter(|s| !s.trim().is_empty())
+                .take(5)
+                .collect()
+        } else {
+            vec![]
+        };
+        if samples.is_empty() {
+            prompt.push_str(&format!("列[{}] \"{}\"  →  (空列)\n", col_idx, header));
+        } else {
+            prompt.push_str(&format!("列[{}] \"{}\"  →  {}\n", col_idx, header, samples.join(" | ")));
         }
     }
 
-    prompt.push_str("\n请分析列映射关系并返回 JSON 结果。");
+    // 目标字段定义
+    prompt.push_str("\n## 目标字段定义\n\n");
+    for field in field_definitions {
+        let type_rules = get_field_type_rules(&field.field_type);
+
+        // 将 additional_requirement 整合进数据特征：
+        // - text 类型：用户输入的识别条件是主要依据
+        // - 其他类型：作为附加约束追加到内置规则后
+        let data_feature = match (&field.additional_requirement, field.field_type.as_str()) {
+            (Some(req), "text") => format!("通用文本字段，识别条件：{}", req),
+            (Some(req), _)      => format!("{}；附加约束：{}", type_rules, req),
+            (None, _)           => type_rules.to_string(),
+        };
+
+        let extraction = field.extraction_hint
+            .as_ref()
+            .map(|h| format!("\n  提取要求: {}", h))
+            .unwrap_or_default();
+        prompt.push_str(&format!(
+            "- {} [{}]: {}\n  数据特征: {}{}\n",
+            field.field_name, field.field_type, field.field_label, data_feature, extraction
+        ));
+    }
+
+    prompt.push_str("\n## 任务\n对每一列执行两步验证（列名语义 + 数据内容），输出 JSON 映射结果。");
     prompt
+}
+
+/// 根据字段类型获取识别规则
+fn get_field_type_rules(field_type: &str) -> &'static str {
+    match field_type {
+        "company" => "数据应含\"有限公司\"、\"有限责任公司\"、\"股份公司\"、\"集团\"、Inc、Ltd、Corp、Co.、LLC等企业实体标识；列名含\"客户\"、\"卖家\"但数据为纯数字/纯字母编号时，是ID列而非公司名，不得映射",
+        "phone"   => "数据应为11位手机号（1开头）或固话格式（区号-号码），纯数字但不符合手机/固话格式的不得映射",
+        "email"   => "数据必须包含@符号，格式为 xxx@xxx.xxx",
+        "name"    => "数据通常为2-4个中文字符或英文人名；若数据含\"公司\"、\"有限\"、\"集团\"等词则为企业名，不得映射为姓名",
+        "address" => "数据应包含省/市/区/路/街/号/楼等地址成分；单纯的城市名或省份名不是完整地址",
+        "date"    => "数据应为日期格式如 YYYY-MM-DD、YYYY/MM/DD、MM/DD/YYYY 等；纯数字时间戳不是日期",
+        "number"  => "数据应为纯数字、整数或小数；含字母或特殊符号的编号不是数字字段",
+        "id_card" => "数据应为15位纯数字或18位（前17位数字+最后1位数字或X）的身份证号格式",
+        "url"     => "数据必须以 http:// 或 https:// 开头",
+        "text"    => "通用文本字段，列名语义匹配即可，但不应映射已被其他类型明确拒绝的列",
+        _         => "根据列名语义和样本数据内容综合判断",
+    }
 }
 
 /// 解析映射响应

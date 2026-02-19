@@ -1,5 +1,5 @@
 <template>
-  <div>
+  <div class="h-full">
     <!-- 加载状态 -->
     <div v-if="loading" class="flex justify-center py-12">
       <UIcon name="i-lucide-refresh-cw" class="w-8 h-8 animate-spin text-primary" />

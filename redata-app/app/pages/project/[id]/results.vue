@@ -26,6 +26,15 @@
       </div>
       <div class="flex gap-2">
         <UButton
+          v-if="selectedIds.size > 0"
+          icon="i-lucide-trash-2"
+          color="error"
+          variant="ghost"
+          @click="confirmBatchDelete"
+        >
+          删除选中 ({{ selectedIds.size }})
+        </UButton>
+        <UButton
           icon="i-lucide-download"
           color="neutral"
           variant="ghost"
@@ -41,6 +50,13 @@
       <table class="min-w-max">
         <thead class="bg-muted sticky top-0 z-10">
           <tr>
+            <th class="px-4 py-3 text-left text-xs font-medium text-muted uppercase tracking-wider w-10">
+              <UCheckbox
+                :model-value="isAllSelected"
+                :indeterminate="isPartialSelected"
+                @update:model-value="toggleSelectAll"
+              />
+            </th>
             <th class="px-4 py-3 text-left text-xs font-medium text-muted uppercase tracking-wider w-16">
               #
             </th>
@@ -58,18 +74,21 @@
             <th class="px-4 py-3 text-left text-xs font-medium text-muted uppercase tracking-wider whitespace-nowrap" style="min-width: 200px;">
               原始数据
             </th>
+            <th class="px-4 py-3 text-center text-xs font-medium text-muted uppercase tracking-wider w-20">
+              操作
+            </th>
           </tr>
         </thead>
         <tbody class="divide-y divide-default bg-elevated">
           <!-- 加载状态 -->
           <tr v-if="loading">
-            <td :colspan="fields.length + 3" class="px-4 py-16 text-center">
+            <td :colspan="fields.length + 5" class="px-4 py-16 text-center">
               <UIcon name="i-lucide-refresh-cw" class="w-8 h-8 animate-spin text-primary mx-auto" />
             </td>
           </tr>
           <!-- 空状态 -->
           <tr v-else-if="records.length === 0">
-            <td :colspan="fields.length + 3" class="px-4 py-16 text-center text-muted">
+            <td :colspan="fields.length + 5" class="px-4 py-16 text-center text-muted">
               导入文件并处理后将在此显示数据
             </td>
           </tr>
@@ -78,7 +97,14 @@
             v-for="(record, index) in records"
             :key="record.id"
             class="hover:bg-muted"
+            :class="{ 'bg-error/5': selectedIds.has(record.id) }"
           >
+            <td class="px-4 py-2.5">
+              <UCheckbox
+                :model-value="selectedIds.has(record.id)"
+                @update:model-value="toggleSelect(record.id)"
+              />
+            </td>
             <td class="px-4 py-2.5 text-sm text-muted">
               {{ (currentPage - 1) * pageSize + index + 1 }}
             </td>
@@ -118,6 +144,15 @@
                 </UButton>
               </div>
               <span v-else class="text-dimmed">-</span>
+            </td>
+            <td class="px-4 py-2.5 text-center">
+              <UButton
+                icon="i-lucide-trash-2"
+                color="error"
+                variant="ghost"
+                size="xs"
+                @click="confirmDelete(record)"
+              />
             </td>
           </tr>
         </tbody>
@@ -161,6 +196,25 @@
         </div>
       </template>
     </UModal>
+
+    <!-- 删除确认弹窗 -->
+    <UModal v-model:open="deleteModalOpen" title="确认删除">
+      <template #body>
+        <p class="text-default">
+          确定要删除 {{ recordToDelete ? '这条记录' : `${selectedIds.size} 条记录` }}吗？此操作无法撤销。
+        </p>
+      </template>
+      <template #footer>
+        <div class="flex justify-end gap-2">
+          <UButton color="neutral" variant="ghost" @click="deleteModalOpen = false">
+            取消
+          </UButton>
+          <UButton color="error" :loading="deleting" @click="executeDelete">
+            删除
+          </UButton>
+        </div>
+      </template>
+    </UModal>
   </div>
 </template>
 
@@ -171,6 +225,7 @@ import { resultsApi } from '~/utils/api'
 
 const route = useRoute()
 const router = useRouter()
+const toast = useToast()
 const projectId = computed(() => Number(route.params.id))
 const fieldStore = useFieldStore()
 
@@ -202,6 +257,88 @@ const rawDataModalContent = ref('')
 function openRawDataModal(rawData: string) {
   rawDataModalContent.value = rawData
   rawDataModalOpen.value = true
+}
+
+// 选择状态
+const selectedIds = ref<Set<number>>(new Set())
+
+// 全选状态
+const isAllSelected = computed(() => {
+  return records.value.length > 0 && records.value.every(r => selectedIds.value.has(r.id))
+})
+
+const isPartialSelected = computed(() => {
+  const selectedCount = records.value.filter(r => selectedIds.value.has(r.id)).length
+  return selectedCount > 0 && selectedCount < records.value.length
+})
+
+function toggleSelect(id: number) {
+  const newSet = new Set(selectedIds.value)
+  if (newSet.has(id)) {
+    newSet.delete(id)
+  } else {
+    newSet.add(id)
+  }
+  selectedIds.value = newSet
+}
+
+function toggleSelectAll() {
+  if (isAllSelected.value) {
+    // 取消选择当前页所有
+    const newSet = new Set(selectedIds.value)
+    records.value.forEach(r => newSet.delete(r.id))
+    selectedIds.value = newSet
+  } else {
+    // 选择当前页所有
+    const newSet = new Set(selectedIds.value)
+    records.value.forEach(r => newSet.add(r.id))
+    selectedIds.value = newSet
+  }
+}
+
+// 删除功能
+const deleteModalOpen = ref(false)
+const recordToDelete = ref<Record<string, any> | null>(null)
+const deleting = ref(false)
+
+function confirmDelete(record: Record<string, any>) {
+  recordToDelete.value = record
+  deleteModalOpen.value = true
+}
+
+function confirmBatchDelete() {
+  recordToDelete.value = null
+  deleteModalOpen.value = true
+}
+
+async function executeDelete() {
+  deleting.value = true
+  try {
+    if (recordToDelete.value) {
+      // 删除单条
+      await resultsApi.delete(projectId.value, recordToDelete.value.id)
+      toast.add({ title: '记录已删除', color: 'success' })
+    } else {
+      // 批量删除
+      const ids = Array.from(selectedIds.value)
+      for (const id of ids) {
+        await resultsApi.delete(projectId.value, id)
+      }
+      toast.add({ title: `已删除 ${ids.length} 条记录`, color: 'success' })
+      selectedIds.value = new Set()
+    }
+    deleteModalOpen.value = false
+    recordToDelete.value = null
+    await loadData()
+  } catch (error: any) {
+    toast.add({
+      title: '删除失败',
+      description: error?.message || String(error),
+      color: 'error',
+    })
+  } finally {
+    deleting.value = false
+  }
 }
 
 // 导出

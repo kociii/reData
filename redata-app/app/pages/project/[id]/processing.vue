@@ -35,7 +35,8 @@
     <!-- 主内容区：左右分栏 -->
     <div v-else class="flex gap-4 flex-1 min-h-0">
       <!-- 左侧任务列表 -->
-      <div class="w-64 flex-shrink-0 flex flex-col gap-4 overflow-y-auto">
+      <div class="w-64 flex-shrink-0 overflow-y-auto min-h-0">
+      <div class="flex flex-col gap-4">
         <!-- 处理中分组 -->
         <div v-if="store.activeTasks.length > 0">
           <div class="flex items-center gap-2 px-1 mb-2">
@@ -97,10 +98,11 @@
           </div>
         </div>
       </div>
+      </div>
 
       <!-- 右侧任务详情 -->
-      <div class="flex-1 flex flex-col gap-4 min-w-0 overflow-y-auto">
-        <template v-if="store.selectedTask">
+      <div class="flex-1 min-h-0 min-w-0 overflow-y-auto">
+        <div v-if="store.selectedTask" class="flex flex-col gap-4">
           <!-- 任务头部：批次号 + 状态 + 控制按钮 -->
           <div class="flex items-center justify-between p-3 bg-elevated rounded-lg border border-default">
             <div>
@@ -148,6 +150,34 @@
                 @click="cancelTask(store.selectedTask.taskId)"
               >
                 取消
+              </UButton>
+            </div>
+            <div
+              v-else-if="store.selectedTask.phase === 'interrupted'"
+              class="flex gap-2"
+            >
+              <UButton
+                icon="i-lucide-x"
+                color="neutral"
+                variant="ghost"
+                size="xs"
+                @click="cancelTask(store.selectedTask.taskId)"
+              >
+                清除
+              </UButton>
+            </div>
+            <div
+              v-else-if="['completed', 'cancelled', 'error'].includes(store.selectedTask.phase)"
+              class="flex gap-2"
+            >
+              <UButton
+                icon="i-lucide-refresh-cw"
+                color="primary"
+                variant="ghost"
+                size="xs"
+                @click="showResetModal = true"
+              >
+                重新开始
               </UButton>
             </div>
           </div>
@@ -289,9 +319,14 @@
                         </div>
                       </template>
 
-                      <!-- 完成 -->
+                      <!-- 完成：显示统计信息 -->
                       <template v-else-if="sheet.phase === 'done'">
-                        <span class="text-xs text-success">完成</span>
+                        <span class="text-xs text-success">
+                          成功 {{ sheet.successCount }} 行
+                        </span>
+                        <template v-if="sheet.errorCount > 0">
+                          <span class="text-xs text-error ml-1">· 失败 {{ sheet.errorCount }}</span>
+                        </template>
                       </template>
 
                       <!-- 错误 -->
@@ -330,10 +365,10 @@
               查看处理结果
             </UButton>
           </div>
-        </template>
+        </div>
 
         <!-- 未选中任务时的提示 -->
-        <div v-else class="flex-1 flex items-center justify-center text-dimmed">
+        <div v-else class="h-full flex items-center justify-center text-dimmed">
           <div class="text-center">
             <UIcon name="i-lucide-mouse-pointer-click" class="w-10 h-10 mx-auto mb-3" />
             <p>选择左侧任务查看详情</p>
@@ -341,6 +376,60 @@
         </div>
       </div>
     </div>
+
+    <!-- 重新开始确认对话框 -->
+    <UModal v-model:open="showResetModal" title="重新开始任务">
+      <template #body>
+        <div class="space-y-4">
+          <p class="text-default">
+            确定要重新开始此任务吗？
+          </p>
+          <div class="bg-muted rounded-lg p-3">
+            <p class="text-sm text-muted mb-2">选择重新开始方式：</p>
+            <div class="space-y-2">
+              <label class="flex items-start gap-2 cursor-pointer">
+                <input
+                  v-model="resetWithDelete"
+                  type="radio"
+                  :value="false"
+                  class="mt-1"
+                />
+                <div>
+                  <span class="text-sm font-medium">保留已导入记录</span>
+                  <p class="text-xs text-muted">重新处理文件，保留已成功导入的数据</p>
+                </div>
+              </label>
+              <label class="flex items-start gap-2 cursor-pointer">
+                <input
+                  v-model="resetWithDelete"
+                  type="radio"
+                  :value="true"
+                  class="mt-1"
+                />
+                <div>
+                  <span class="text-sm font-medium text-error">删除已导入记录</span>
+                  <p class="text-xs text-muted">删除此批次已导入的所有记录，然后重新处理</p>
+                </div>
+              </label>
+            </div>
+          </div>
+        </div>
+      </template>
+      <template #footer>
+        <div class="flex justify-end gap-2">
+          <UButton color="neutral" variant="ghost" @click="showResetModal = false">
+            取消
+          </UButton>
+          <UButton
+            :color="resetWithDelete ? 'error' : 'primary'"
+            :loading="resetting"
+            @click="executeReset"
+          >
+            {{ resetWithDelete ? '删除并重新开始' : '重新开始' }}
+          </UButton>
+        </div>
+      </template>
+    </UModal>
   </div>
 </template>
 
@@ -389,6 +478,7 @@ function getTaskPhaseIcon(phase: TaskPhase): string {
     completed: 'i-lucide-circle-check',
     cancelled: 'i-lucide-circle-x',
     error: 'i-lucide-circle-alert',
+    interrupted: 'i-lucide-circle-slash',
   }
   return icons[phase] ?? 'i-lucide-circle'
 }
@@ -401,6 +491,7 @@ function getTaskPhaseIconClass(phase: TaskPhase): string {
     completed: 'text-success',
     cancelled: 'text-muted',
     error: 'text-error',
+    interrupted: 'text-warning',
   }
   return classes[phase] ?? 'text-muted'
 }
@@ -413,6 +504,7 @@ function getTaskPhaseText(phase: TaskPhase): string {
     completed: '已完成',
     cancelled: '已取消',
     error: '失败',
+    interrupted: '异常中断',
   }
   return texts[phase] ?? phase
 }
@@ -555,6 +647,33 @@ async function cancelTask(taskId: string) {
   }
 }
 
+// 重新开始任务
+const showResetModal = ref(false)
+const resetWithDelete = ref(false)
+const resetting = ref(false)
+
+async function executeReset() {
+  if (!store.selectedTask) return
+
+  resetting.value = true
+  try {
+    await store.resetTask(store.selectedTask.taskId, resetWithDelete.value)
+    showResetModal.value = false
+    toast.add({
+      title: resetWithDelete.value ? '已删除记录并重新开始' : '任务已重新开始',
+      color: 'success',
+    })
+    // 重新获取任务列表
+    await store.fetchTasks(projectId.value)
+  }
+  catch (error: any) {
+    toast.add({ title: '重新开始失败', description: error?.message, color: 'error' })
+  }
+  finally {
+    resetting.value = false
+  }
+}
+
 function viewResults() {
   const batch = store.selectedTask?.batchNumber
   const basePath = `/project/${projectId.value}/results`
@@ -564,7 +683,7 @@ function viewResults() {
 // ── 生命周期 ───────────────────────────────────────────────────────────────────
 
 onMounted(async () => {
-  await store.startEventListener()
+  // 事件监听器已在 app.vue 全局启动，这里只需获取任务列表
   await store.fetchTasks(projectId.value)
   store.startStatusPolling()
   // 自动选中第一个活动任务，或第一个历史任务
@@ -577,7 +696,7 @@ onMounted(async () => {
 })
 
 onUnmounted(() => {
-  store.stopEventListener()
+  // 停止状态轮询（事件监听器保持运行）
   store.stopStatusPolling()
 })
 </script>

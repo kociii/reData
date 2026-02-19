@@ -149,6 +149,38 @@ pub fn run() {
     });
     println!("✅ 数据库迁移完成");
 
+    // 清理滞留任务：崩溃/强退后残留的 processing/paused → interrupted
+    println!("🔄 正在清理滞留任务...");
+    runtime.block_on(async {
+        use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Set};
+        use backend::infrastructure::persistence::models::task;
+        match task::Entity::find()
+            .filter(
+                sea_orm::Condition::any()
+                    .add(task::Column::Status.eq("processing"))
+                    .add(task::Column::Status.eq("paused")),
+            )
+            .all(&db)
+            .await
+        {
+            Ok(stale) => {
+                let count = stale.len();
+                for t in stale {
+                    let mut active: task::ActiveModel = t.into();
+                    active.status = Set("interrupted".to_string());
+                    active.updated_at = Set(Some(chrono::Utc::now()));
+                    let _ = active.update(&db).await;
+                }
+                if count > 0 {
+                    println!("⚠️  已将 {} 个滞留任务标记为 interrupted", count);
+                } else {
+                    println!("✅ 无滞留任务");
+                }
+            }
+            Err(e) => eprintln!("警告: 清理滞留任务失败: {}", e),
+        }
+    });
+
     // 将数据库连接包装为 Arc，用于在多个 commands 之间共享
     let db = Arc::new(db);
 
@@ -205,6 +237,8 @@ pub fn run() {
             commands::update_task_status,
             commands::create_batch,
             commands::get_batches,
+            commands::get_task_full_progress,
+            commands::reset_processing_task,
             // 处理 Commands
             commands::start_processing,
             commands::pause_processing_task,
