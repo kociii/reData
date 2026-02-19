@@ -14,7 +14,7 @@
           class="flex items-center gap-1 cursor-pointer"
           @click="clearBatchFilter"
         >
-          批次：{{ batchFilter }}
+          导入文件：{{ batches.find(b => b.batch_number === batchFilter)?.source_file ?? batchFilter }}
           <UIcon name="i-lucide-x" class="w-3 h-3" />
         </UBadge>
         <UInput
@@ -25,14 +25,23 @@
         />
       </div>
       <div class="flex gap-2">
-        <!-- 数据来源按钮 -->
+        <!-- 筛选按钮 -->
         <UButton
-          icon="i-lucide-folder-tree"
+          icon="i-lucide-filter"
           color="neutral"
           variant="ghost"
-          @click="showSourcePanel = !showSourcePanel"
+          :class="{ 'bg-primary/10 text-primary': showFilterPanel || hasActiveFilters }"
+          @click="showFilterPanel = !showFilterPanel"
         >
-          数据来源
+          筛选
+          <UBadge
+            v-if="activeFilterCount > 0"
+            color="primary"
+            size="xs"
+            class="ml-1"
+          >
+            {{ activeFilterCount }}
+          </UBadge>
         </UButton>
         <UButton
           v-if="selectedIds.size > 0"
@@ -47,149 +56,161 @@
           icon="i-lucide-download"
           color="neutral"
           variant="ghost"
-          @click="exportData"
+          @click="openExportModal"
         >
           导出
         </UButton>
       </div>
     </div>
 
-    <!-- 主内容区 -->
-    <div class="flex-1 flex min-h-0">
-      <!-- 数据来源面板 -->
-      <div
-        v-if="showSourcePanel"
-        class="w-80 border-r border-default bg-elevated flex-shrink-0 overflow-y-auto"
-      >
-        <div class="p-4">
-          <div class="flex items-center justify-between mb-3">
-            <h3 class="text-sm font-medium">数据来源</h3>
+    <!-- 筛选面板 -->
+    <div v-if="showFilterPanel" class="border-b border-default bg-elevated flex-shrink-0">
+      <div class="px-6 py-3 space-y-3">
+        <!-- 快捷筛选 -->
+        <div class="flex items-center gap-4 flex-wrap">
+          <div class="flex items-center gap-2">
+            <span class="text-xs text-muted">来源文件：</span>
+            <USelectMenu
+              v-model="filterSourceFile"
+              :items="sourceFileOptions"
+              placeholder="全部"
+              size="xs"
+              class="w-48"
+              value-key="value"
+              @update:model-value="applyFilters"
+            />
+          </div>
+          <div class="flex items-center gap-2">
+            <span class="text-xs text-muted">导入文件：</span>
+            <USelectMenu
+              v-model="filterBatch"
+              :items="batchOptions"
+              placeholder="全部"
+              size="xs"
+              class="w-48"
+              value-key="value"
+              @update:model-value="applyFilters"
+            />
+            <!-- 当选中批次时显示撤回按钮 -->
             <UButton
-              icon="i-lucide-refresh-cw"
+              v-if="filterBatch"
+              icon="i-lucide-undo-2"
+              color="error"
+              variant="ghost"
+              size="xs"
+              @click="confirmRollbackBatch(filterBatch)"
+            >
+              撤回此批次
+            </UButton>
+          </div>
+        </div>
+
+        <!-- 筛选条件 -->
+        <div v-if="filterConditions.length > 0" class="space-y-2">
+          <div
+            v-for="(condition, index) in filterConditions"
+            :key="condition.id"
+            class="flex items-center gap-2"
+          >
+            <!-- 字段选择 -->
+            <USelectMenu
+              v-model="condition.field"
+              :items="fieldOptions"
+              placeholder="选择字段"
+              size="xs"
+              class="w-32"
+              value-key="value"
+              @update:model-value="onConditionFieldChange(condition)"
+            />
+            <!-- 运算符选择 -->
+            <USelectMenu
+              v-model="condition.operator"
+              :items="getOperatorOptions(condition.field)"
+              placeholder="运算符"
+              size="xs"
+              class="w-28"
+              value-key="value"
+            />
+            <!-- 值输入 -->
+            <template v-if="condition.operator !== 'is_empty' && condition.operator !== 'is_not_empty'">
+              <UInput
+                v-if="condition.operator !== 'between'"
+                v-model="condition.value as string"
+                placeholder="值"
+                size="xs"
+                class="w-40"
+              />
+              <div v-else class="flex items-center gap-1">
+                <UInput
+                  v-model="(condition.value as [string, string])[0]"
+                  placeholder="起始"
+                  size="xs"
+                  class="w-24"
+                />
+                <span class="text-xs text-muted">-</span>
+                <UInput
+                  v-model="(condition.value as [string, string])[1]"
+                  placeholder="结束"
+                  size="xs"
+                  class="w-24"
+                />
+              </div>
+            </template>
+            <!-- 删除按钮 -->
+            <UButton
+              icon="i-lucide-x"
               color="neutral"
               variant="ghost"
               size="xs"
-              :loading="loadingBatches"
-              @click="loadBatches"
+              @click="removeCondition(index)"
             />
           </div>
+        </div>
 
-          <!-- 加载状态 -->
-          <div v-if="loadingBatches" class="py-8 text-center text-muted">
-            <UIcon name="i-lucide-refresh-cw" class="w-6 h-6 animate-spin mx-auto mb-2" />
-            <span class="text-sm">加载中...</span>
+        <!-- 操作按钮 -->
+        <div class="flex items-center gap-2">
+          <UButton
+            icon="i-lucide-plus"
+            color="neutral"
+            variant="ghost"
+            size="xs"
+            @click="addCondition"
+          >
+            添加条件
+          </UButton>
+          <div class="flex items-center gap-2 ml-4">
+            <span class="text-xs text-muted">条件组合：</span>
+            <URadioGroup
+              v-model="filterConjunction"
+              :items="[{ value: 'and', label: '且' }, { value: 'or', label: '或' }]"
+              size="xs"
+              @change="applyFilters"
+            />
           </div>
-
-          <!-- 空状态 -->
-          <div v-else-if="batches.length === 0" class="py-8 text-center text-muted">
-            <UIcon name="i-lucide-folder-open" class="w-8 h-8 mx-auto mb-2 opacity-50" />
-            <span class="text-sm">暂无导入数据</span>
-          </div>
-
-          <!-- 批次列表 -->
-          <div v-else class="space-y-3">
-            <div
-              v-for="batch in batches"
-              :key="batch.batch_number"
-              class="border border-default rounded-lg overflow-hidden"
-            >
-              <!-- 批次头部 -->
-              <div
-                class="flex items-center justify-between px-3 py-2 bg-muted cursor-pointer hover:bg-default"
-                @click="toggleBatch(batch.batch_number)"
-              >
-                <div class="flex items-center gap-2 min-w-0">
-                  <UIcon
-                    :name="expandedBatches.has(batch.batch_number) ? 'i-lucide-chevron-down' : 'i-lucide-chevron-right'"
-                    class="w-4 h-4 flex-shrink-0 text-muted"
-                  />
-                  <span class="text-sm font-medium truncate">{{ batch.batch_number }}</span>
-                  <UBadge
-                    v-if="batch.status === 'rolled_back'"
-                    color="warning"
-                    variant="subtle"
-                    size="xs"
-                  >
-                    已撤回
-                  </UBadge>
-                </div>
-                <div class="flex items-center gap-2 flex-shrink-0">
-                  <span class="text-xs text-muted">{{ batch.total_records }} 条</span>
-                  <UButton
-                    v-if="batch.total_records > 0"
-                    icon="i-lucide-undo-2"
-                    color="error"
-                    variant="ghost"
-                    size="xs"
-                    @click.stop="confirmRollback('batch', batch)"
-                  />
-                </div>
-              </div>
-
-              <!-- 批次内容（文件列表） -->
-              <div v-if="expandedBatches.has(batch.batch_number)" class="border-t border-default">
-                <div
-                  v-for="file in batch.files"
-                  :key="file.file_name"
-                  class="border-b border-default last:border-b-0"
-                >
-                  <!-- 文件头部 -->
-                  <div
-                    class="flex items-center justify-between px-3 py-2 pl-8 cursor-pointer hover:bg-muted"
-                    @click="toggleFile(batch.batch_number, file.file_name)"
-                  >
-                    <div class="flex items-center gap-2 min-w-0">
-                      <UIcon
-                        :name="expandedFiles.has(`${batch.batch_number}:${file.file_name}`) ? 'i-lucide-chevron-down' : 'i-lucide-chevron-right'"
-                        class="w-4 h-4 flex-shrink-0 text-muted"
-                      />
-                      <UIcon name="i-lucide-file-spreadsheet" class="w-4 h-4 flex-shrink-0 text-muted" />
-                      <span class="text-sm truncate">{{ file.file_name }}</span>
-                    </div>
-                    <div class="flex items-center gap-2 flex-shrink-0">
-                      <span class="text-xs text-muted">{{ file.total_records }} 条</span>
-                      <UButton
-                        v-if="file.total_records > 0"
-                        icon="i-lucide-undo-2"
-                        color="error"
-                        variant="ghost"
-                        size="xs"
-                        @click.stop="confirmRollback('file', batch, file)"
-                      />
-                    </div>
-                  </div>
-
-                  <!-- Sheet 列表 -->
-                  <div v-if="expandedFiles.has(`${batch.batch_number}:${file.file_name}`)" class="border-t border-default">
-                    <div
-                      v-for="sheet in file.sheets"
-                      :key="sheet.sheet_name"
-                      class="flex items-center justify-between px-3 py-2 pl-14 hover:bg-muted"
-                    >
-                      <div class="flex items-center gap-2 min-w-0">
-                        <UIcon name="i-lucide-table" class="w-4 h-4 flex-shrink-0 text-muted" />
-                        <span class="text-sm truncate">{{ sheet.sheet_name }}</span>
-                      </div>
-                      <div class="flex items-center gap-2 flex-shrink-0">
-                        <span class="text-xs text-muted">{{ sheet.record_count }} 条</span>
-                        <UButton
-                          v-if="sheet.record_count > 0"
-                          icon="i-lucide-undo-2"
-                          color="error"
-                          variant="ghost"
-                          size="xs"
-                          @click="confirmRollback('sheet', batch, file, sheet)"
-                        />
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
+          <div class="flex-1" />
+          <UButton
+            color="neutral"
+            variant="ghost"
+            size="xs"
+            :disabled="!hasActiveFilters"
+            @click="clearAllFilters"
+          >
+            重置筛选
+          </UButton>
+          <UButton
+            color="primary"
+            size="xs"
+            :disabled="filterConditions.length === 0 && !filterSourceFile && !filterBatch"
+            @click="applyFilters"
+          >
+            应用筛选
+          </UButton>
         </div>
       </div>
+    </div>
 
+    <!-- 主内容区 -->
+    <div class="flex-1 flex min-h-0">
       <!-- 数据表格（支持横向滚动） -->
       <div class="flex-1 overflow-auto">
         <table class="min-w-max">
@@ -212,6 +233,9 @@
                 style="min-width: 100px; max-width: 180px;"
               >
                 {{ field.field_label }}
+              </th>
+              <th class="px-4 py-3 text-left text-xs font-medium text-muted uppercase tracking-wider whitespace-nowrap" style="min-width: 130px;">
+                导入时间
               </th>
               <th class="px-4 py-3 text-left text-xs font-medium text-muted uppercase tracking-wider whitespace-nowrap" style="min-width: 120px;">
                 来源
@@ -263,6 +287,9 @@
                   {{ record[field.id] || '-' }}
                 </div>
               </td>
+              <td class="px-4 py-2.5 text-sm text-muted whitespace-nowrap">
+                {{ formatImportTime(record.created_at) }}
+              </td>
               <td class="px-4 py-2.5 text-sm text-muted" style="max-width: 150px;">
                 <div class="whitespace-pre-wrap break-words">
                   {{ record.source_file || '-' }}
@@ -307,9 +334,18 @@
 
     <!-- 分页栏 -->
     <div v-if="totalCount > 0" class="flex justify-between items-center px-6 py-2.5 border-t border-default bg-elevated flex-shrink-0">
-      <span class="text-sm text-muted">
-        显示 {{ (currentPage - 1) * pageSize + 1 }} - {{ Math.min(currentPage * pageSize, totalCount) }} / {{ totalCount }} 条
-      </span>
+      <div class="flex items-center gap-3">
+        <span class="text-sm text-muted">
+          显示 {{ (currentPage - 1) * pageSize + 1 }} - {{ Math.min(currentPage * pageSize, totalCount) }} / {{ totalCount }} 条
+        </span>
+        <USelectMenu
+          v-model="pageSize"
+          :items="pageSizeOptions"
+          value-key="value"
+          size="xs"
+          class="w-28"
+        />
+      </div>
       <UPagination
         v-model:page="currentPage"
         :total="totalCount"
@@ -319,6 +355,82 @@
         size="sm"
       />
     </div>
+
+    <!-- 导出对话框 -->
+    <UModal v-model:open="exportModalOpen" title="导出数据">
+      <template #body>
+        <div class="space-y-5">
+          <!-- 字段选择 -->
+          <div>
+            <div class="flex items-center justify-between mb-2">
+              <span class="text-sm font-medium">选择导出字段</span>
+              <div class="flex gap-2">
+                <button class="text-xs text-primary hover:underline" @click="exportSelectAll">全选</button>
+                <span class="text-xs text-dimmed">·</span>
+                <button class="text-xs text-muted hover:underline" @click="exportSelectNone">清空</button>
+              </div>
+            </div>
+            <div class="grid grid-cols-2 gap-1.5 max-h-48 overflow-y-auto pr-1">
+              <label
+                v-for="field in fields"
+                :key="field.id"
+                class="flex items-center gap-2 text-sm cursor-pointer select-none px-2 py-1.5 rounded hover:bg-muted"
+              >
+                <UCheckbox
+                  :model-value="exportFieldIds.includes(String(field.id))"
+                  @update:model-value="toggleExportField(String(field.id), $event)"
+                />
+                <span class="truncate">{{ field.field_label }}</span>
+              </label>
+              <!-- 固定附加列 -->
+              <label class="flex items-center gap-2 text-sm cursor-pointer select-none px-2 py-1.5 rounded hover:bg-muted">
+                <UCheckbox v-model="exportIncludeImportTime" />
+                <span class="truncate text-muted">导入时间</span>
+              </label>
+              <label class="flex items-center gap-2 text-sm cursor-pointer select-none px-2 py-1.5 rounded hover:bg-muted">
+                <UCheckbox v-model="exportIncludeSourceFile" />
+                <span class="truncate text-muted">来源文件</span>
+              </label>
+            </div>
+          </div>
+
+          <!-- 导出范围 -->
+          <div>
+            <span class="text-sm font-medium block mb-2">导出范围</span>
+            <div class="space-y-2">
+              <label class="flex items-center gap-2 cursor-pointer">
+                <input v-model="exportRange" type="radio" value="all" />
+                <span class="text-sm">全部数据</span>
+                <span class="text-xs text-muted">所有成功记录（不受当前筛选影响）</span>
+              </label>
+              <label class="flex items-center gap-2 cursor-pointer">
+                <input v-model="exportRange" type="radio" value="filtered" />
+                <span class="text-sm">当前筛选结果</span>
+                <span class="text-xs text-muted">（共 {{ totalCount }} 条）</span>
+              </label>
+              <label class="flex items-center gap-2 cursor-pointer">
+                <input v-model="exportRange" type="radio" value="current_page" />
+                <span class="text-sm">仅当前页</span>
+                <span class="text-xs text-muted">（{{ records.length }} 条）</span>
+              </label>
+            </div>
+          </div>
+        </div>
+      </template>
+      <template #footer>
+        <div class="flex justify-end gap-2">
+          <UButton color="neutral" variant="ghost" @click="exportModalOpen = false">取消</UButton>
+          <UButton
+            icon="i-lucide-download"
+            :loading="exportLoading"
+            :disabled="exportFieldIds.length === 0 && !exportIncludeImportTime && !exportIncludeSourceFile"
+            @click="executeExport"
+          >
+            导出 {{ exportRangeLabel }}
+          </UButton>
+        </div>
+      </template>
+    </UModal>
 
     <!-- 原始数据详情弹窗 -->
     <UModal v-model:open="rawDataModalOpen">
@@ -395,9 +507,11 @@
 
 <script setup lang="ts">
 import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
+import { save } from '@tauri-apps/plugin-dialog'
 import { useFieldStore } from '~/stores/field'
 import { resultsApi, batchesApi } from '~/utils/api'
-import type { BatchDetailResponse, FileImportDetail, SheetImportDetail } from '~/types'
+import type { BatchDetailResponse, FilterCondition, SourceFileInfo, AdvancedFilterRequest } from '~/types'
+import { OPERATOR_LABELS, getOperatorsForFieldType } from '~/types'
 
 const route = useRoute()
 const router = useRouter()
@@ -417,7 +531,13 @@ const loading = ref(false)
 const records = ref<Record<string, any>[]>([])
 const totalCount = ref(0)
 const currentPage = ref(1)
-const pageSize = 50
+const pageSize = ref(50)
+const pageSizeOptions = [
+  { label: '50 条/页', value: 50 },
+  { label: '100 条/页', value: 100 },
+  { label: '200 条/页', value: 200 },
+  { label: '500 条/页', value: 500 },
+]
 
 // 搜索（带防抖）
 const searchQuery = ref('')
@@ -426,6 +546,148 @@ let searchTimeout: ReturnType<typeof setTimeout> | null = null
 // 字段定义
 const fields = computed(() => fieldStore.fields)
 
+// ============ 筛选相关 ============
+
+const showFilterPanel = ref(false)
+const filterConditions = ref<FilterCondition[]>([])
+const filterConjunction = ref<'and' | 'or'>('and')
+const filterSourceFile = ref<string | null>(null)
+const filterBatch = ref<string | null>(null)
+
+// 来源文件选项
+const sourceFiles = ref<SourceFileInfo[]>([])
+const sourceFileOptions = computed(() => [
+  { label: '全部', value: null },
+  ...sourceFiles.value.map(f => ({ label: `${f.source_file} (${f.record_count})`, value: f.source_file }))
+])
+
+// 导入记录选项（显示文件名而非批次号）
+const batchOptions = computed(() => [
+  { label: '全部', value: null },
+  ...batches.value.map(b => ({
+    label: `${b.source_file} (${b.total_records}条)`,
+    value: b.batch_number
+  }))
+])
+
+// 字段选项
+const fieldOptions = computed(() =>
+  fields.value.map(f => ({
+    label: f.field_label,
+    value: String(f.id),
+    fieldType: f.field_type
+  }))
+)
+
+// 获取运算符选项
+function getOperatorOptions(fieldId: string | null) {
+  if (!fieldId) return []
+  const field = fields.value.find(f => String(f.id) === fieldId)
+  if (!field) return []
+  const operators = getOperatorsForFieldType(field.field_type)
+  return operators.map(op => ({
+    label: OPERATOR_LABELS[op],
+    value: op
+  }))
+}
+
+// 条件字段变更时重置运算符
+function onConditionFieldChange(condition: FilterCondition) {
+  condition.operator = 'eq'
+  condition.value = ''
+}
+
+// 添加筛选条件
+function addCondition() {
+  const firstField = fields.value[0]
+  filterConditions.value.push({
+    id: `cond-${Date.now()}`,
+    field: firstField ? String(firstField.id) : '',
+    operator: 'eq',
+    value: ''
+  })
+}
+
+// 移除筛选条件
+function removeCondition(index: number) {
+  filterConditions.value.splice(index, 1)
+}
+
+// 活跃筛选条件数量
+const activeFilterCount = computed(() => {
+  let count = filterConditions.value.length
+  if (filterSourceFile.value) count++
+  if (filterBatch.value) count++
+  return count
+})
+
+// 是否有活跃的筛选条件
+const hasActiveFilters = computed(() =>
+  filterConditions.value.length > 0 ||
+  filterSourceFile.value !== null ||
+  filterBatch.value !== null
+)
+
+// 清除所有筛选
+function clearAllFilters() {
+  filterConditions.value = []
+  filterSourceFile.value = null
+  filterBatch.value = null
+  filterConjunction.value = 'and'
+  applyFilters()
+}
+
+// 应用筛选
+async function applyFilters() {
+  currentPage.value = 1
+  await loadDataAdvanced()
+}
+
+// 加载来源文件列表
+async function loadSourceFiles() {
+  try {
+    sourceFiles.value = await resultsApi.getSourceFiles(projectId.value)
+  } catch (error) {
+    console.error('Failed to load source files:', error)
+  }
+}
+
+// 高级筛选查询
+async function loadDataAdvanced() {
+  loading.value = true
+  try {
+    // 构建筛选请求
+    const validConditions = filterConditions.value.filter(c => c.field && c.operator)
+
+    const filterRequest = {
+      search: searchQuery.value || undefined,
+      conditions: validConditions.map(c => ({
+        field: c.field,
+        operator: c.operator,
+        value: c.value
+      })),
+      source_file: filterSourceFile.value || undefined,
+      batch_number: filterBatch.value || batchFilter.value || undefined,
+      conjunction: filterConjunction.value
+    }
+
+    const result = await resultsApi.queryAdvanced(
+      projectId.value,
+      filterRequest,
+      currentPage.value,
+      pageSize.value
+    )
+    records.value = result.records
+    totalCount.value = result.total
+  } catch (error) {
+    console.error('Failed to load data:', error)
+    records.value = []
+    totalCount.value = 0
+  } finally {
+    loading.value = false
+  }
+}
+
 // 原始数据弹窗
 const rawDataModalOpen = ref(false)
 const rawDataModalContent = ref('')
@@ -433,6 +695,23 @@ const rawDataModalContent = ref('')
 function openRawDataModal(rawData: string) {
   rawDataModalContent.value = rawData
   rawDataModalOpen.value = true
+}
+
+function formatImportTime(isoString: string | undefined): string {
+  if (!isoString) return '-'
+  try {
+    const d = new Date(isoString)
+    if (isNaN(d.getTime())) return '-'
+    const year = d.getFullYear()
+    const month = String(d.getMonth() + 1).padStart(2, '0')
+    const day = String(d.getDate()).padStart(2, '0')
+    const hour = String(d.getHours()).padStart(2, '0')
+    const min = String(d.getMinutes()).padStart(2, '0')
+    return `${year}-${month}-${day} ${hour}:${min}`
+  }
+  catch {
+    return '-'
+  }
 }
 
 // 选择状态
@@ -518,104 +797,140 @@ async function executeDelete() {
   }
 }
 
-// 导出
-const exportData = async () => {
-  try {
-    const blob = await resultsApi.export(projectId.value, 'xlsx')
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = `results_${projectId.value}.xlsx`
-    a.click()
-    URL.revokeObjectURL(url)
-  } catch (error) {
-    console.error('Export failed:', error)
+// ============ 导出 ============
+
+const exportModalOpen = ref(false)
+const exportLoading = ref(false)
+const exportFieldIds = ref<string[]>([])
+const exportIncludeImportTime = ref(true)
+const exportIncludeSourceFile = ref(true)
+const exportRange = ref<'all' | 'filtered' | 'current_page'>('all')
+
+// 导出按钮标签
+const exportRangeLabel = computed(() => {
+  if (exportRange.value === 'current_page') return `${records.value.length} 条`
+  if (exportRange.value === 'filtered') return `${totalCount.value} 条`
+  return '所有数据'
+})
+
+function openExportModal() {
+  exportFieldIds.value = fields.value.map(f => String(f.id))
+  exportIncludeImportTime.value = true
+  exportIncludeSourceFile.value = true
+  exportRange.value = hasActiveFilters.value ? 'filtered' : 'all'
+  exportModalOpen.value = true
+}
+
+function toggleExportField(fieldId: string, checked: boolean) {
+  if (checked) {
+    if (!exportFieldIds.value.includes(fieldId)) exportFieldIds.value = [...exportFieldIds.value, fieldId]
+  }
+  else {
+    exportFieldIds.value = exportFieldIds.value.filter(id => id !== fieldId)
   }
 }
 
-// 数据来源面板
-const showSourcePanel = ref(false)
-const loadingBatches = ref(false)
+function exportSelectAll() {
+  exportFieldIds.value = fields.value.map(f => String(f.id))
+  exportIncludeImportTime.value = true
+  exportIncludeSourceFile.value = true
+}
+
+function exportSelectNone() {
+  exportFieldIds.value = []
+  exportIncludeImportTime.value = false
+  exportIncludeSourceFile.value = false
+}
+
+// 构建当前筛选请求（用于导出）
+function buildCurrentFilter(): AdvancedFilterRequest {
+  const validConditions = filterConditions.value.filter(c => c.field && c.operator)
+  return {
+    search: searchQuery.value || undefined,
+    conditions: validConditions,
+    source_file: filterSourceFile.value || undefined,
+    batch_number: filterBatch.value || batchFilter.value || undefined,
+    conjunction: filterConjunction.value,
+  }
+}
+
+async function executeExport() {
+  // 打开原生保存对话框
+  const savePath = await save({
+    defaultPath: `export_${new Date().toISOString().slice(0, 10)}.xlsx`,
+    filters: [{ name: 'Excel 工作簿', extensions: ['xlsx'] }],
+  })
+  if (!savePath) return  // 用户取消
+
+  exportLoading.value = true
+  try {
+    const selectedFields = fields.value.filter(f => exportFieldIds.value.includes(String(f.id)))
+    const fieldIds = selectedFields.map(f => String(f.id))
+    const fieldLabels = selectedFields.map(f => f.field_label)
+
+    let filter: AdvancedFilterRequest | null = null
+    let exportPage: number | null = null
+    let exportPageSize: number | null = null
+
+    if (exportRange.value === 'filtered') {
+      filter = buildCurrentFilter()
+    } else if (exportRange.value === 'current_page') {
+      filter = buildCurrentFilter()
+      exportPage = currentPage.value
+      exportPageSize = pageSize.value
+    }
+    // 'all': filter = null，导出全部成功记录
+
+    const count = await resultsApi.exportXlsx(projectId.value, {
+      filePath: savePath,
+      fieldIds,
+      fieldLabels,
+      includeImportTime: exportIncludeImportTime.value,
+      includeSourceFile: exportIncludeSourceFile.value,
+      filter,
+      page: exportPage,
+      pageSize: exportPageSize,
+    })
+
+    exportModalOpen.value = false
+    toast.add({ title: `已导出 ${count} 条记录`, color: 'success' })
+  }
+  catch (error: any) {
+    toast.add({ title: '导出失败', description: error?.message || String(error), color: 'error' })
+  }
+  finally {
+    exportLoading.value = false
+  }
+}
+
+// 数据来源批次列表（用于批次筛选器选项）
 const batches = ref<BatchDetailResponse[]>([])
-const expandedBatches = ref<Set<string>>(new Set())
-const expandedFiles = ref<Set<string>>(new Set())
 
 async function loadBatches() {
-  loadingBatches.value = true
   try {
     batches.value = await batchesApi.listWithStats(projectId.value)
   } catch (error: any) {
     console.error('Failed to load batches:', error)
-    toast.add({
-      title: '加载批次失败',
-      description: error?.message || String(error),
-      color: 'error',
-    })
-  } finally {
-    loadingBatches.value = false
   }
-}
-
-function toggleBatch(batchNumber: string) {
-  const newSet = new Set(expandedBatches.value)
-  if (newSet.has(batchNumber)) {
-    newSet.delete(batchNumber)
-  } else {
-    newSet.add(batchNumber)
-  }
-  expandedBatches.value = newSet
-}
-
-function toggleFile(batchNumber: string, fileName: string) {
-  const key = `${batchNumber}:${fileName}`
-  const newSet = new Set(expandedFiles.value)
-  if (newSet.has(key)) {
-    newSet.delete(key)
-  } else {
-    newSet.add(key)
-  }
-  expandedFiles.value = newSet
 }
 
 // 撤回功能
 const rollbackModalOpen = ref(false)
 const rollingBack = ref(false)
 const rollbackTarget = ref<{
-  type: 'batch' | 'file' | 'sheet'
   batchNumber: string
-  fileName?: string
-  sheetName?: string
   description: string
   count: number
 } | null>(null)
 
-function confirmRollback(
-  type: 'batch' | 'file' | 'sheet',
-  batch: BatchDetailResponse,
-  file?: FileImportDetail,
-  sheet?: SheetImportDetail
-) {
-  let description = ''
-  let count = 0
-
-  if (type === 'batch') {
-    description = `批次 "${batch.batch_number}"`
-    count = batch.total_records
-  } else if (type === 'file' && file) {
-    description = `文件 "${file.file_name}"`
-    count = file.total_records
-  } else if (type === 'sheet' && file && sheet) {
-    description = `Sheet "${sheet.sheet_name}"`
-    count = sheet.record_count
-  }
-
+// 通过批次号触发撤回
+function confirmRollbackBatch(batchNumber: string | null) {
+  if (!batchNumber) return
+  const batch = batches.value.find(b => b.batch_number === batchNumber)
   rollbackTarget.value = {
-    type,
-    batchNumber: batch.batch_number,
-    fileName: file?.file_name,
-    sheetName: sheet?.sheet_name,
-    description,
-    count,
+    batchNumber,
+    description: `文件 "${batch?.source_file ?? batchNumber}"`,
+    count: batch?.total_records ?? 0,
   }
   rollbackModalOpen.value = true
 }
@@ -625,22 +940,18 @@ async function executeRollback() {
 
   rollingBack.value = true
   try {
-    let result
-    const target = rollbackTarget.value
-
-    if (target.type === 'batch') {
-      result = await batchesApi.rollback(projectId.value, target.batchNumber)
-    } else if (target.type === 'file' && target.fileName) {
-      result = await batchesApi.rollbackFile(projectId.value, target.batchNumber, target.fileName)
-    } else if (target.type === 'sheet' && target.fileName && target.sheetName) {
-      result = await batchesApi.rollbackSheet(projectId.value, target.batchNumber, target.fileName, target.sheetName)
-    }
+    const result = await batchesApi.rollback(projectId.value, rollbackTarget.value.batchNumber)
 
     toast.add({
       title: '撤回成功',
       description: result?.message,
       color: 'success',
     })
+
+    // 如果撤回的是当前筛选的批次，清除批次筛选
+    if (filterBatch.value === rollbackTarget.value.batchNumber) {
+      filterBatch.value = null
+    }
 
     rollbackModalOpen.value = false
     rollbackTarget.value = null
@@ -660,11 +971,17 @@ async function executeRollback() {
 
 // 加载数据
 async function loadData() {
+  // 如果有筛选条件，使用高级查询
+  if (hasActiveFilters.value) {
+    await loadDataAdvanced()
+    return
+  }
+
   loading.value = true
   try {
     const result = await resultsApi.query(projectId.value, {
       page: currentPage.value,
-      page_size: pageSize,
+      page_size: pageSize.value,
       search: searchQuery.value || undefined,
       status: 'success',
       batch_number: batchFilter.value,
@@ -682,6 +999,10 @@ async function loadData() {
 }
 
 watch(currentPage, () => loadData())
+watch(pageSize, () => {
+  currentPage.value = 1
+  loadData()
+})
 watch(batchFilter, () => {
   currentPage.value = 1
   loadData()
@@ -697,7 +1018,7 @@ watch(searchQuery, () => {
 
 onMounted(async () => {
   await fieldStore.fetchFields(projectId.value)
-  await Promise.all([loadData(), loadBatches()])
+  await Promise.all([loadData(), loadBatches(), loadSourceFiles()])
 })
 
 onUnmounted(() => {

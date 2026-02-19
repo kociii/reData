@@ -27,6 +27,8 @@ import type {
   BatchDetailResponse,
   ProjectGroupResponse,
   GroupWithChildren,
+  AdvancedFilterRequest,
+  SourceFileInfo,
 } from '~/types'
 
 // 使用 Tauri Commands 模式（零网络开销）
@@ -521,49 +523,17 @@ export const processingApi = {
   },
 }
 
-// ============ 批次 API ============
+// ============ 批次/导入记录 API ============
 
 export const batchesApi = {
-  list: async (projectId: number) => {
-    if (USE_TAURI_COMMANDS) {
-      return await invoke<Batch[]>('get_batches', { projectId })
-    }
-    return request<Batch[]>(`/batches/${projectId}`)
-  },
-
-  create: async (projectId: number, batchNumber: string, fileCount: number) => {
-    if (USE_TAURI_COMMANDS) {
-      return await invoke<Batch>('create_batch', { projectId, batchNumber, fileCount })
-    }
-    return request<Batch>('/batches/', {
-      method: 'POST',
-      body: JSON.stringify({ project_id: projectId, batch_number: batchNumber, file_count: fileCount }),
-    })
-  },
-
-  // 获取项目所有批次（带详情统计）
+  // 获取项目所有导入记录（以任务为单位，带实时记录数统计）
   listWithStats: async (projectId: number): Promise<BatchDetailResponse[]> => {
     return await invoke<BatchDetailResponse[]>('get_project_batches_with_stats', { projectId })
   },
 
-  // 获取批次详情
-  getDetails: async (projectId: number, batchNumber: string): Promise<BatchDetailResponse> => {
-    return await invoke<BatchDetailResponse>('get_batch_details', { projectId, batchNumber })
-  },
-
-  // 撤回整个批次
+  // 撤回整个导入（通过 batch_number）
   rollback: async (projectId: number, batchNumber: string): Promise<RollbackResult> => {
     return await invoke<RollbackResult>('rollback_batch', { projectId, batchNumber })
-  },
-
-  // 撤回单个文件
-  rollbackFile: async (projectId: number, batchNumber: string, fileName: string): Promise<RollbackResult> => {
-    return await invoke<RollbackResult>('rollback_file', { projectId, batchNumber, fileName })
-  },
-
-  // 撤回单个 Sheet
-  rollbackSheet: async (projectId: number, batchNumber: string, fileName: string, sheetName: string): Promise<RollbackResult> => {
-    return await invoke<RollbackResult>('rollback_sheet', { projectId, batchNumber, fileName, sheetName })
   },
 }
 
@@ -600,11 +570,63 @@ export const resultsApi = {
         source_sheet: r.source_sheet,
         batch_number: r.batch_number,
         status: r.status,
+        created_at: r.created_at,
       })),
       total: response.total,
       page: response.page,
       page_size: response.page_size,
     } as QueryResult
+  },
+
+  // 高级筛选查询
+  queryAdvanced: async (
+    projectId: number,
+    filter: AdvancedFilterRequest,
+    page?: number,
+    pageSize?: number
+  ): Promise<QueryResult> => {
+    const response = await invoke<QueryRecordsResponse>('query_records_advanced', {
+      projectId,
+      page: page ?? 1,
+      pageSize: pageSize ?? 50,
+      filter,
+    })
+
+    return {
+      records: response.records.map(r => ({
+        id: r.id,
+        ...r.data,
+        raw_data: r.raw_data ?? null,
+        source_file: r.source_file,
+        source_sheet: r.source_sheet,
+        batch_number: r.batch_number,
+        status: r.status,
+        created_at: r.created_at,
+      })),
+      total: response.total,
+      page: response.page,
+      page_size: response.page_size,
+    } as QueryResult
+  },
+
+  // 获取字段唯一值（用于下拉筛选）
+  getFieldDistinctValues: async (
+    projectId: number,
+    fieldId: string,
+    search?: string,
+    limit?: number
+  ): Promise<string[]> => {
+    return await invoke<string[]>('get_field_distinct_values', {
+      projectId,
+      fieldId,
+      search: search ?? null,
+      limit: limit ?? 100,
+    })
+  },
+
+  // 获取来源文件列表
+  getSourceFiles: async (projectId: number): Promise<SourceFileInfo[]> => {
+    return await invoke<SourceFileInfo[]>('get_source_files', { projectId })
   },
 
   update: async (projectId: number, recordId: number, data: Record<string, any>) => {
@@ -615,13 +637,33 @@ export const resultsApi = {
     await invoke<void>('delete_record', { id: recordId })
   },
 
-  export: async (
+  // 导出记录为 xlsx 文件
+  // filter=null：导出所有成功记录；filter=Some(f)：导出筛选结果
+  // page/pageSize=null：导出全部匹配记录；page/pageSize=数字：仅导出对应分页
+  exportXlsx: async (
     projectId: number,
-    format: 'xlsx' | 'csv' = 'xlsx',
-    batchNumber?: string
-  ): Promise<Blob> => {
-    // TODO: 实现导出功能
-    throw new Error('导出功能尚未实现')
+    options: {
+      filePath: string
+      fieldIds: string[]
+      fieldLabels: string[]
+      includeImportTime: boolean
+      includeSourceFile: boolean
+      filter: AdvancedFilterRequest | null
+      page: number | null
+      pageSize: number | null
+    }
+  ): Promise<number> => {
+    return await invoke<number>('export_records_xlsx', {
+      projectId,
+      filePath: options.filePath,
+      fieldIds: options.fieldIds,
+      fieldLabels: options.fieldLabels,
+      includeImportTime: options.includeImportTime,
+      includeSourceFile: options.includeSourceFile,
+      filter: options.filter,
+      page: options.page,
+      pageSize: options.pageSize,
+    })
   },
 }
 

@@ -10,7 +10,7 @@ use serde::Serialize;
 use std::sync::Arc;
 
 use crate::backend::infrastructure::persistence::models::{
-    task, ProcessingTask, batch, Batch,
+    task, ProcessingTask,
     task_file_progress, TaskFileProgress, ProjectRecord,
 };
 
@@ -54,29 +54,6 @@ impl From<task::Model> for TaskResponse {
             source_files,
             created_at: m.created_at.to_rfc3339(),
             updated_at: m.updated_at.map(|t| t.to_rfc3339()),
-        }
-    }
-}
-
-#[derive(Debug, Serialize)]
-pub struct BatchResponse {
-    pub id: i32,
-    pub batch_number: String,
-    pub project_id: i32,
-    pub file_count: i32,
-    pub record_count: i32,
-    pub created_at: String,
-}
-
-impl From<batch::Model> for BatchResponse {
-    fn from(m: batch::Model) -> Self {
-        Self {
-            id: m.id,
-            batch_number: m.batch_number,
-            project_id: m.project_id,
-            file_count: m.file_count,
-            record_count: m.record_count,
-            created_at: m.created_at.to_rfc3339(),
         }
     }
 }
@@ -201,47 +178,6 @@ pub async fn update_task_status(
         .map_err(|e| format!("数据库错误: {}", e))?;
 
     Ok(result.into())
-}
-
-/// 创建批次
-#[tauri::command]
-pub async fn create_batch(
-    db: tauri::State<'_, Arc<DatabaseConnection>>,
-    project_id: i32,
-    batch_number: String,
-    file_count: i32,
-) -> Result<BatchResponse, String> {
-    let new_batch = batch::ActiveModel {
-        batch_number: Set(batch_number),
-        project_id: Set(project_id),
-        file_count: Set(file_count),
-        record_count: Set(0),
-        created_at: Set(chrono::Utc::now()),
-        ..Default::default()
-    };
-
-    let result = new_batch
-        .insert(db.inner().as_ref())
-        .await
-        .map_err(|e| format!("数据库错误: {}", e))?;
-
-    Ok(result.into())
-}
-
-/// 获取项目批次列表
-#[tauri::command]
-pub async fn get_batches(
-    db: tauri::State<'_, Arc<DatabaseConnection>>,
-    project_id: i32,
-) -> Result<Vec<BatchResponse>, String> {
-    let batches = Batch::find()
-        .filter(batch::Column::ProjectId.eq(project_id))
-        .order_by_desc(batch::Column::CreatedAt)
-        .all(db.inner().as_ref())
-        .await
-        .map_err(|e| format!("数据库错误: {}", e))?;
-
-    Ok(batches.into_iter().map(|b| b.into()).collect())
 }
 
 // ============ 文件进度持久化 ============
@@ -515,36 +451,19 @@ pub struct RollbackResult {
     pub message: String,
 }
 
-/// 文件导入详情（用于批次详情）
-#[derive(Debug, Serialize)]
-pub struct FileImportDetail {
-    pub file_name: String,
-    pub sheets: Vec<SheetImportDetail>,
-    pub total_records: i32,
-    pub can_rollback: bool,
-}
-
-/// Sheet 导入详情
-#[derive(Debug, Serialize)]
-pub struct SheetImportDetail {
-    pub sheet_name: String,
-    pub record_count: i32,
-    pub status: String,
-    pub can_rollback: bool,
-}
-
-/// 批次详情
+/// 导入记录详情（以任务为单位，1个任务=1个文件）
 #[derive(Debug, Serialize)]
 pub struct BatchDetailResponse {
     pub batch_number: String,
+    pub task_id: String,
+    pub source_file: String,
     pub project_id: i32,
     pub created_at: String,
     pub status: String,
     pub total_records: i32,
-    pub files: Vec<FileImportDetail>,
 }
 
-/// 撤回整个批次
+/// 撤回整个导入（通过 batch_number 关联到 processing_tasks）
 #[tauri::command]
 pub async fn rollback_batch(
     db: tauri::State<'_, Arc<DatabaseConnection>>,
@@ -555,16 +474,16 @@ pub async fn rollback_batch(
 
     tracing::info!("Rolling back batch {} for project {}", batch_number, project_id);
 
-    // 验证批次存在且属于该项目
-    let batch = Batch::find()
-        .filter(batch::Column::BatchNumber.eq(&batch_number))
-        .filter(batch::Column::ProjectId.eq(project_id))
+    // 验证该 batch_number 存在且属于该项目（从 processing_tasks 验证）
+    let _task = ProcessingTask::find()
+        .filter(task::Column::BatchNumber.eq(&batch_number))
+        .filter(task::Column::ProjectId.eq(project_id))
         .one(db.inner().as_ref())
         .await
         .map_err(|e| format!("数据库错误: {}", e))?
-        .ok_or_else(|| format!("批次 {} 不存在或不属于项目 {}", batch_number, project_id))?;
+        .ok_or_else(|| format!("导入记录 {} 不存在或不属于项目 {}", batch_number, project_id))?;
 
-    // 删除该批次的所有记录
+    // 删除该 batch_number 的所有记录
     let delete_result = ProjectRecord::delete_many()
         .filter(record::Column::ProjectId.eq(project_id))
         .filter(record::Column::BatchNumber.eq(&batch_number))
@@ -574,335 +493,74 @@ pub async fn rollback_batch(
 
     let deleted_count = delete_result.rows_affected;
 
-    // 更新批次记录数
-    let mut batch_active: batch::ActiveModel = batch.into();
-    batch_active.record_count = Set(0);
-    batch_active.update(db.inner().as_ref())
-        .await
-        .map_err(|e| format!("更新批次失败: {}", e))?;
-
     tracing::info!("Rolled back batch {}, deleted {} records", batch_number, deleted_count);
 
     Ok(RollbackResult {
         success: true,
         deleted_count,
-        message: format!("已撤回批次 {}，删除了 {} 条记录", batch_number, deleted_count),
+        message: format!("已撤回导入，删除了 {} 条记录", deleted_count),
     })
 }
 
-/// 撤回单个文件
-#[tauri::command]
-pub async fn rollback_file(
-    db: tauri::State<'_, Arc<DatabaseConnection>>,
-    project_id: i32,
-    batch_number: String,
-    file_name: String,
-) -> Result<RollbackResult, String> {
-    tracing::info!("Rolling back file {} in batch {} for project {}", file_name, batch_number, project_id);
-
-    // 验证批次存在且属于该项目
-    let batch = Batch::find()
-        .filter(batch::Column::BatchNumber.eq(&batch_number))
-        .filter(batch::Column::ProjectId.eq(project_id))
-        .one(db.inner().as_ref())
-        .await
-        .map_err(|e| format!("数据库错误: {}", e))?
-        .ok_or_else(|| format!("批次 {} 不存在或不属于项目 {}", batch_number, project_id))?;
-
-    // 删除该文件的所有记录
-    let sql = r#"
-        DELETE FROM project_records
-        WHERE project_id = ? AND batch_number = ? AND source_file = ?
-    "#;
-    let result = db.inner().as_ref()
-        .execute(Statement::from_sql_and_values(
-            db.inner().as_ref().get_database_backend(),
-            sql,
-            [
-                project_id.into(),
-                batch_number.clone().into(),
-                file_name.clone().into(),
-            ],
-        ))
-        .await
-        .map_err(|e| format!("删除记录失败: {}", e))?;
-
-    let deleted_count = result.rows_affected();
-
-    // 更新批次记录数
-    let remaining_count: i64 = db.inner().as_ref()
-        .query_one(Statement::from_sql_and_values(
-            db.inner().as_ref().get_database_backend(),
-            "SELECT COUNT(*) as cnt FROM project_records WHERE project_id = ? AND batch_number = ?",
-            [project_id.into(), batch_number.clone().into()],
-        ))
-        .await
-        .map_err(|e| format!("数据库错误: {}", e))?
-        .map(|r| r.try_get_by_index::<i64>(0).unwrap_or(0))
-        .unwrap_or(0);
-
-    let mut batch_active: batch::ActiveModel = batch.into();
-    batch_active.record_count = Set(remaining_count as i32);
-    batch_active.update(db.inner().as_ref())
-        .await
-        .map_err(|e| format!("更新批次失败: {}", e))?;
-
-    tracing::info!("Rolled back file {}, deleted {} records", file_name, deleted_count);
-
-    Ok(RollbackResult {
-        success: true,
-        deleted_count,
-        message: format!("已撤回文件 {}，删除了 {} 条记录", file_name, deleted_count),
-    })
-}
-
-/// 撤回单个 Sheet
-#[tauri::command]
-pub async fn rollback_sheet(
-    db: tauri::State<'_, Arc<DatabaseConnection>>,
-    project_id: i32,
-    batch_number: String,
-    file_name: String,
-    sheet_name: String,
-) -> Result<RollbackResult, String> {
-    tracing::info!("Rolling back sheet {} in file {} batch {} for project {}",
-        sheet_name, file_name, batch_number, project_id);
-
-    // 验证批次存在且属于该项目
-    let batch = Batch::find()
-        .filter(batch::Column::BatchNumber.eq(&batch_number))
-        .filter(batch::Column::ProjectId.eq(project_id))
-        .one(db.inner().as_ref())
-        .await
-        .map_err(|e| format!("数据库错误: {}", e))?
-        .ok_or_else(|| format!("批次 {} 不存在或不属于项目 {}", batch_number, project_id))?;
-
-    // 删除该 Sheet 的所有记录
-    let sql = r#"
-        DELETE FROM project_records
-        WHERE project_id = ? AND batch_number = ? AND source_file = ? AND source_sheet = ?
-    "#;
-    let result = db.inner().as_ref()
-        .execute(Statement::from_sql_and_values(
-            db.inner().as_ref().get_database_backend(),
-            sql,
-            [
-                project_id.into(),
-                batch_number.clone().into(),
-                file_name.clone().into(),
-                sheet_name.clone().into(),
-            ],
-        ))
-        .await
-        .map_err(|e| format!("删除记录失败: {}", e))?;
-
-    let deleted_count = result.rows_affected();
-
-    // 更新批次记录数
-    let remaining_count: i64 = db.inner().as_ref()
-        .query_one(Statement::from_sql_and_values(
-            db.inner().as_ref().get_database_backend(),
-            "SELECT COUNT(*) as cnt FROM project_records WHERE project_id = ? AND batch_number = ?",
-            [project_id.into(), batch_number.clone().into()],
-        ))
-        .await
-        .map_err(|e| format!("数据库错误: {}", e))?
-        .map(|r| r.try_get_by_index::<i64>(0).unwrap_or(0))
-        .unwrap_or(0);
-
-    let mut batch_active: batch::ActiveModel = batch.into();
-    batch_active.record_count = Set(remaining_count as i32);
-    batch_active.update(db.inner().as_ref())
-        .await
-        .map_err(|e| format!("更新批次失败: {}", e))?;
-
-    tracing::info!("Rolled back sheet {}, deleted {} records", sheet_name, deleted_count);
-
-    Ok(RollbackResult {
-        success: true,
-        deleted_count,
-        message: format!("已撤回 Sheet {}，删除了 {} 条记录", sheet_name, deleted_count),
-    })
-}
-
-/// 获取批次详情（含文件和 Sheet 统计）
-#[tauri::command]
-pub async fn get_batch_details(
-    db: tauri::State<'_, Arc<DatabaseConnection>>,
-    project_id: i32,
-    batch_number: String,
-) -> Result<BatchDetailResponse, String> {
-    // 获取批次信息
-    let batch = Batch::find()
-        .filter(batch::Column::BatchNumber.eq(&batch_number))
-        .filter(batch::Column::ProjectId.eq(project_id))
-        .one(db.inner().as_ref())
-        .await
-        .map_err(|e| format!("数据库错误: {}", e))?
-        .ok_or_else(|| format!("批次 {} 不存在或不属于项目 {}", batch_number, project_id))?;
-
-    // 查询文件和 Sheet 的统计信息
-    let sql = r#"
-        SELECT
-            source_file,
-            source_sheet,
-            COUNT(*) as record_count
-        FROM project_records
-        WHERE project_id = ? AND batch_number = ?
-        GROUP BY source_file, source_sheet
-        ORDER BY source_file, source_sheet
-    "#;
-
-    let rows = db.inner().as_ref()
-        .query_all(Statement::from_sql_and_values(
-            db.inner().as_ref().get_database_backend(),
-            sql,
-            [project_id.into(), batch_number.clone().into()],
-        ))
-        .await
-        .map_err(|e| format!("数据库错误: {}", e))?;
-
-    // 按文件分组
-    let mut files_map: std::collections::HashMap<String, FileImportDetail> =
-        std::collections::HashMap::new();
-
-    for row in rows {
-        let source_file: String = row.try_get_by_index::<String>(0).unwrap_or_default();
-        let source_sheet: Option<String> = row.try_get_by_index::<Option<String>>(1).ok().flatten();
-        let record_count: i32 = row.try_get_by_index::<i64>(2).unwrap_or(0) as i32;
-
-        let file_detail = files_map.entry(source_file.clone()).or_insert_with(|| {
-            FileImportDetail {
-                file_name: source_file,
-                sheets: Vec::new(),
-                total_records: 0,
-                can_rollback: true,
-            }
-        });
-
-        if let Some(sheet_name) = source_sheet {
-            file_detail.sheets.push(SheetImportDetail {
-                sheet_name,
-                record_count,
-                status: "success".to_string(),
-                can_rollback: true,
-            });
-        }
-
-        file_detail.total_records += record_count;
-    }
-
-    // 转换为 Vec
-    let files: Vec<FileImportDetail> = files_map.into_values().collect();
-    let total_records: i32 = files.iter().map(|f| f.total_records).sum();
-
-    // 判断批次状态
-    let status = if total_records > 0 { "completed" } else { "rolled_back" }.to_string();
-
-    Ok(BatchDetailResponse {
-        batch_number: batch.batch_number,
-        project_id: batch.project_id,
-        created_at: batch.created_at.to_rfc3339(),
-        status,
-        total_records,
-        files,
-    })
-}
-
-/// 获取项目的所有批次列表（带记录数统计）
+/// 获取项目的所有导入记录列表（以任务为单位，带实时记录数统计）
 #[tauri::command]
 pub async fn get_project_batches_with_stats(
     db: tauri::State<'_, Arc<DatabaseConnection>>,
     project_id: i32,
 ) -> Result<Vec<BatchDetailResponse>, String> {
-    // 获取项目的所有批次
-    let batches = Batch::find()
-        .filter(batch::Column::ProjectId.eq(project_id))
-        .order_by_desc(batch::Column::CreatedAt)
+    // 从 processing_tasks 获取所有任务（有 batch_number 的）
+    let tasks = ProcessingTask::find()
+        .filter(task::Column::ProjectId.eq(project_id))
+        .filter(task::Column::BatchNumber.is_not_null())
+        .order_by_desc(task::Column::CreatedAt)
         .all(db.inner().as_ref())
         .await
         .map_err(|e| format!("数据库错误: {}", e))?;
 
     let mut results = Vec::new();
 
-    for batch in batches {
-        // 获取该批次的实际记录数
-        let count_sql = r#"
-            SELECT COUNT(*) as cnt
-            FROM project_records
-            WHERE project_id = ? AND batch_number = ?
-        "#;
+    for task_model in tasks {
+        let batch_number = match task_model.batch_number.clone() {
+            Some(bn) => bn,
+            None => continue,
+        };
+
+        // 从 source_files JSON 提取第一个文件名作为显示名称
+        let source_file = task_model.source_files
+            .as_deref()
+            .and_then(|s| serde_json::from_str::<Vec<String>>(s).ok())
+            .and_then(|v| v.into_iter().next())
+            .unwrap_or_else(|| batch_number.clone());
+
+        // 查询实时记录数
+        let count_sql = "SELECT COUNT(*) FROM project_records WHERE project_id = ? AND batch_number = ?";
         let actual_count: i64 = db.inner().as_ref()
             .query_one(Statement::from_sql_and_values(
                 db.inner().as_ref().get_database_backend(),
                 count_sql,
-                [project_id.into(), batch.batch_number.clone().into()],
+                [project_id.into(), batch_number.clone().into()],
             ))
             .await
             .map_err(|e| format!("数据库错误: {}", e))?
             .map(|r| r.try_get_by_index::<i64>(0).unwrap_or(0))
             .unwrap_or(0);
 
-        // 获取文件统计
-        let files_sql = r#"
-            SELECT
-                source_file,
-                source_sheet,
-                COUNT(*) as record_count
-            FROM project_records
-            WHERE project_id = ? AND batch_number = ?
-            GROUP BY source_file, source_sheet
-            ORDER BY source_file, source_sheet
-        "#;
-
-        let rows = db.inner().as_ref()
-            .query_all(Statement::from_sql_and_values(
-                db.inner().as_ref().get_database_backend(),
-                files_sql,
-                [project_id.into(), batch.batch_number.clone().into()],
-            ))
-            .await
-            .map_err(|e| format!("数据库错误: {}", e))?;
-
-        let mut files_map: std::collections::HashMap<String, FileImportDetail> =
-            std::collections::HashMap::new();
-
-        for row in rows {
-            let source_file: String = row.try_get_by_index::<String>(0).unwrap_or_default();
-            let source_sheet: Option<String> = row.try_get_by_index::<Option<String>>(1).ok().flatten();
-            let record_count: i32 = row.try_get_by_index::<i64>(2).unwrap_or(0) as i32;
-
-            let file_detail = files_map.entry(source_file.clone()).or_insert_with(|| {
-                FileImportDetail {
-                    file_name: source_file,
-                    sheets: Vec::new(),
-                    total_records: 0,
-                    can_rollback: true,
-                }
-            });
-
-            if let Some(sheet_name) = source_sheet {
-                file_detail.sheets.push(SheetImportDetail {
-                    sheet_name,
-                    record_count,
-                    status: "success".to_string(),
-                    can_rollback: true,
-                });
-            }
-
-            file_detail.total_records += record_count;
-        }
-
-        let files: Vec<FileImportDetail> = files_map.into_values().collect();
-        let status = if actual_count > 0 { "completed" } else { "rolled_back" }.to_string();
+        let status = if actual_count > 0 {
+            task_model.status.clone()
+        } else if task_model.status == "completed" {
+            "rolled_back".to_string()
+        } else {
+            task_model.status.clone()
+        };
 
         results.push(BatchDetailResponse {
-            batch_number: batch.batch_number,
-            project_id: batch.project_id,
-            created_at: batch.created_at.to_rfc3339(),
+            batch_number,
+            task_id: task_model.id,
+            source_file,
+            project_id: task_model.project_id,
+            created_at: task_model.created_at.to_rfc3339(),
             status,
             total_records: actual_count as i32,
-            files,
         });
     }
 

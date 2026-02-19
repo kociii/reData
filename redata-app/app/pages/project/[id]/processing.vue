@@ -60,7 +60,8 @@
               <div class="min-w-0 flex-1">
                 <div class="font-medium text-highlighted truncate text-xs">{{ getTaskTitle(task) }}</div>
                 <div class="text-xs text-muted">
-                  {{ task.phase === 'paused' ? '已暂停' : '处理中' }} · 成功 {{ task.successCount }}
+                  {{ task.phase === 'paused' ? '已暂停' : '处理中' }}
+                  <template v-if="task.processedRows > 0"> · {{ task.processedRows }} 行</template>
                 </div>
               </div>
             </div>
@@ -91,7 +92,8 @@
               <div class="min-w-0 flex-1">
                 <div class="font-medium text-highlighted truncate text-xs">{{ getTaskTitle(task) }}</div>
                 <div class="text-xs text-muted">
-                  {{ getTaskPhaseText(task.phase) }} · 成功 {{ task.successCount }}
+                  {{ getTaskPhaseText(task.phase) }}
+                  <template v-if="task.successCount > 0"> · {{ task.successCount }} 行</template>
                 </div>
               </div>
             </div>
@@ -103,19 +105,21 @@
       <!-- 右侧任务详情 -->
       <div class="flex-1 min-h-0 min-w-0 overflow-y-auto">
         <div v-if="store.selectedTask" class="flex flex-col gap-4">
-          <!-- 任务头部：批次号 + 状态 + 控制按钮 -->
+          <!-- 任务头部：文件名 + 状态 + 控制按钮 -->
           <div class="flex items-center justify-between p-3 bg-elevated rounded-lg border border-default">
-            <div>
-              <div class="font-medium text-highlighted text-sm">
-                {{ store.selectedTask.batchNumber || `任务 ${store.selectedTask.taskId.slice(0, 8)}` }}
+            <div class="min-w-0 flex-1 mr-3">
+              <div class="font-medium text-highlighted text-sm truncate">
+                {{ getTaskTitle(store.selectedTask) }}
               </div>
               <div class="text-xs text-muted flex items-center gap-1.5 mt-0.5">
                 <UIcon
                   :name="getTaskPhaseIcon(store.selectedTask.phase)"
                   :class="getTaskPhaseIconClass(store.selectedTask.phase)"
-                  class="w-3.5 h-3.5"
+                  class="w-3.5 h-3.5 flex-shrink-0"
                 />
                 {{ getTaskPhaseText(store.selectedTask.phase) }}
+                <span class="text-dimmed">·</span>
+                <span>{{ formatTime(store.selectedTask.startedAt) }}</span>
               </div>
             </div>
             <div
@@ -167,6 +171,20 @@
               </UButton>
             </div>
             <div
+              v-else-if="store.selectedTask.phase === 'starting'"
+              class="flex gap-2"
+            >
+              <UButton
+                icon="i-lucide-trash-2"
+                color="error"
+                variant="ghost"
+                size="xs"
+                @click="cancelTask(store.selectedTask.taskId)"
+              >
+                删除任务
+              </UButton>
+            </div>
+            <div
               v-else-if="['completed', 'cancelled', 'error'].includes(store.selectedTask.phase)"
               class="flex gap-2"
             >
@@ -185,7 +203,7 @@
           <!-- 汇总进度 -->
           <div class="p-3 bg-elevated rounded-lg border border-default">
             <div class="flex items-center justify-between mb-2">
-              <span class="text-xs font-medium text-muted">总进度</span>
+              <span class="text-xs font-medium text-muted">处理进度</span>
               <span class="text-xs text-muted">
                 成功 {{ store.selectedTask.successCount }}
                 <template v-if="store.selectedTask.errorCount > 0">
@@ -206,14 +224,101 @@
             </div>
           </div>
 
-          <!-- 文件/Sheet 进度树 -->
+          <!-- Sheet 进度列表 -->
           <div class="bg-elevated rounded-lg border border-default overflow-hidden">
-            <!-- 无文件时的占位 -->
-            <div
-              v-if="store.selectedTask.files.length === 0"
-              class="p-6 text-center text-muted text-sm"
-            >
-              <template v-if="['completed', 'cancelled', 'error'].includes(store.selectedTask.phase)">
+            <!-- Sheet 列表 -->
+            <template v-if="store.selectedTask.files[0]?.sheets?.length">
+              <div
+                v-for="(sheet, idx) in store.selectedTask.files[0].sheets"
+                :key="sheet.sheetName"
+                :class="idx < store.selectedTask.files[0].sheets.length - 1 ? 'border-b border-default' : ''"
+                class="flex items-start gap-3 px-4 py-3"
+              >
+                <!-- Sheet 状态图标 -->
+                <UIcon
+                  :name="getSheetPhaseIcon(sheet.phase)"
+                  :class="getSheetPhaseIconClass(sheet.phase)"
+                  class="flex-shrink-0 w-4 h-4 mt-0.5"
+                />
+
+                <!-- Sheet 信息 -->
+                <div class="min-w-0 flex-1">
+                  <div class="flex items-center gap-2 flex-wrap">
+                    <span class="text-sm font-medium text-default">{{ sheet.sheetName }}</span>
+                    <!-- AI 置信度标签 -->
+                    <span
+                      v-if="sheet.aiConfidence !== null"
+                      class="text-xs text-muted"
+                    >
+                      [AI {{ (sheet.aiConfidence * 100).toFixed(0) }}%
+                      <template v-if="sheet.mappingCount !== null">· {{ sheet.mappingCount }} 字段</template>
+                      ]
+                    </span>
+                  </div>
+
+                  <!-- 状态描述 -->
+                  <div class="mt-0.5">
+                    <!-- AI 识别中 -->
+                    <template v-if="sheet.phase === 'ai_analyzing'">
+                      <div class="flex items-center gap-1.5 text-xs text-muted">
+                        <UIcon name="i-lucide-sparkles" class="w-3 h-3 text-primary animate-pulse" />
+                        AI 识别列映射中...
+                      </div>
+                    </template>
+
+                    <!-- 导入中：不定进度动画 -->
+                    <template v-else-if="sheet.phase === 'importing'">
+                      <div class="flex items-center gap-2 mt-1">
+                        <UProgress
+                          size="xs"
+                          class="flex-1 max-w-32"
+                        />
+                        <span class="text-xs text-muted">导入中...</span>
+                      </div>
+                    </template>
+
+                    <!-- 完成：显示统计信息 -->
+                    <template v-else-if="sheet.phase === 'done'">
+                      <span class="text-xs text-success">
+                        成功 {{ sheet.successCount }} 行
+                      </span>
+                      <template v-if="sheet.errorCount > 0">
+                        <span class="text-xs text-error ml-1">· 失败 {{ sheet.errorCount }}</span>
+                      </template>
+                    </template>
+
+                    <!-- 错误 -->
+                    <template v-else-if="sheet.phase === 'error'">
+                      <span class="text-xs text-error">{{ sheet.errorMessage || '处理失败' }}</span>
+                    </template>
+
+                    <!-- 等待 -->
+                    <template v-else>
+                      <span class="text-xs text-dimmed">等待中</span>
+                    </template>
+                  </div>
+                </div>
+
+                <!-- Sheet 状态徽章 -->
+                <UBadge
+                  :color="getSheetPhaseBadgeColor(sheet.phase)"
+                  variant="subtle"
+                  size="xs"
+                  class="flex-shrink-0 mt-0.5"
+                >
+                  {{ getSheetPhaseBadgeText(sheet.phase) }}
+                </UBadge>
+              </div>
+            </template>
+
+            <!-- 无 Sheet 时占位 -->
+            <div v-else class="p-6 text-center text-muted text-sm">
+              <template v-if="store.selectedTask.phase === 'starting'">
+                <UIcon name="i-lucide-file-plus" class="w-5 h-5 mx-auto mb-2 text-dimmed" />
+                <p>请点击下方"导入文件并开始处理"按钮</p>
+                <p class="text-xs text-dimmed mt-1">选择 Excel 文件开始处理</p>
+              </template>
+              <template v-else-if="['completed', 'cancelled', 'error'].includes(store.selectedTask.phase)">
                 <UIcon name="i-lucide-file-x" class="w-5 h-5 mx-auto mb-2 text-dimmed" />
                 暂无文件明细记录
               </template>
@@ -221,137 +326,6 @@
                 <UIcon name="i-lucide-loader" class="w-5 h-5 mx-auto mb-2 animate-spin text-primary" />
                 等待文件处理...
               </template>
-            </div>
-
-            <!-- 文件列表 -->
-            <div
-              v-for="(file, fileIdx) in store.selectedTask.files"
-              :key="file.fileName"
-              :class="fileIdx < store.selectedTask.files.length - 1 ? 'border-b border-default' : ''"
-            >
-              <!-- 文件行 -->
-              <div class="flex items-center gap-3 px-4 py-3">
-                <UIcon
-                  :name="getFilePhaseIcon(file.phase)"
-                  :class="getFilePhaseIconClass(file.phase)"
-                  class="flex-shrink-0 w-4 h-4"
-                />
-                <div class="min-w-0 flex-1">
-                  <div class="text-sm font-medium text-highlighted truncate">{{ file.fileName }}</div>
-                  <div class="text-xs text-muted mt-0.5">
-                    <template v-if="file.phase === 'done'">
-                      完成 · 成功 {{ file.successCount }} 行
-                      <template v-if="file.errorCount > 0">· 失败 {{ file.errorCount }}</template>
-                    </template>
-                    <template v-else-if="file.phase === 'error'">
-                      处理失败
-                    </template>
-                    <template v-else-if="file.phase === 'processing'">
-                      处理中...
-                    </template>
-                    <template v-else>
-                      等待中
-                    </template>
-                  </div>
-                </div>
-                <UBadge
-                  :color="getFilePhaseBadgeColor(file.phase)"
-                  variant="subtle"
-                  size="xs"
-                >
-                  {{ getFilePhaseBadgeText(file.phase) }}
-                </UBadge>
-              </div>
-
-              <!-- Sheet 列表 -->
-              <div v-if="file.sheets.length > 0" class="pb-2 space-y-0.5 bg-muted/30">
-                <div
-                  v-for="sheet in file.sheets"
-                  :key="sheet.sheetName"
-                  class="flex items-start gap-2 px-4 py-2"
-                >
-                  <!-- 连接线 -->
-                  <div class="flex flex-col items-center flex-shrink-0 mt-1" style="width: 20px;">
-                    <div class="w-px h-2 bg-default" />
-                    <div class="w-3 h-px bg-default" />
-                  </div>
-
-                  <!-- Sheet 状态图标 -->
-                  <UIcon
-                    :name="getSheetPhaseIcon(sheet.phase)"
-                    :class="getSheetPhaseIconClass(sheet.phase)"
-                    class="flex-shrink-0 w-3.5 h-3.5 mt-0.5"
-                  />
-
-                  <!-- Sheet 信息 -->
-                  <div class="min-w-0 flex-1">
-                    <div class="flex items-center gap-2 flex-wrap">
-                      <span class="text-xs font-medium text-default">{{ sheet.sheetName }}</span>
-                      <!-- AI 置信度标签 -->
-                      <span
-                        v-if="sheet.aiConfidence !== null"
-                        class="text-xs text-muted"
-                      >
-                        [AI {{ (sheet.aiConfidence * 100).toFixed(0) }}%
-                        <template v-if="sheet.mappingCount !== null">· {{ sheet.mappingCount }} 字段</template>
-                        ]
-                      </span>
-                    </div>
-
-                    <!-- 状态描述 -->
-                    <div class="mt-0.5">
-                      <!-- AI 识别中 -->
-                      <template v-if="sheet.phase === 'ai_analyzing'">
-                        <div class="flex items-center gap-1.5 text-xs text-muted">
-                          <UIcon name="i-lucide-sparkles" class="w-3 h-3 text-primary animate-pulse" />
-                          AI 识别列映射中...
-                        </div>
-                      </template>
-
-                      <!-- 导入中：不定进度动画 -->
-                      <template v-else-if="sheet.phase === 'importing'">
-                        <div class="flex items-center gap-2 mt-1">
-                          <UProgress
-                            size="xs"
-                            class="flex-1 max-w-32"
-                          />
-                          <span class="text-xs text-muted">导入中...</span>
-                        </div>
-                      </template>
-
-                      <!-- 完成：显示统计信息 -->
-                      <template v-else-if="sheet.phase === 'done'">
-                        <span class="text-xs text-success">
-                          成功 {{ sheet.successCount }} 行
-                        </span>
-                        <template v-if="sheet.errorCount > 0">
-                          <span class="text-xs text-error ml-1">· 失败 {{ sheet.errorCount }}</span>
-                        </template>
-                      </template>
-
-                      <!-- 错误 -->
-                      <template v-else-if="sheet.phase === 'error'">
-                        <span class="text-xs text-error">{{ sheet.errorMessage || '处理失败' }}</span>
-                      </template>
-
-                      <!-- 等待 -->
-                      <template v-else>
-                        <span class="text-xs text-dimmed">等待中</span>
-                      </template>
-                    </div>
-                  </div>
-
-                  <!-- Sheet 状态徽章 -->
-                  <UBadge
-                    :color="getSheetPhaseBadgeColor(sheet.phase)"
-                    variant="subtle"
-                    size="xs"
-                    class="flex-shrink-0 mt-0.5"
-                  >
-                    {{ getSheetPhaseBadgeText(sheet.phase) }}
-                  </UBadge>
-                </div>
-              </div>
             </div>
           </div>
 
@@ -377,15 +351,24 @@
       </div>
     </div>
 
-    <!-- 重新开始确认对话框 -->
-    <UModal v-model:open="showResetModal" title="重新开始任务">
+    <!-- 重新处理确认对话框 -->
+    <UModal v-model:open="showResetModal" title="重新处理">
       <template #body>
         <div class="space-y-4">
-          <p class="text-default">
-            确定要重新开始此任务吗？
+          <p class="text-default text-sm">
+            <template v-if="store.selectedTask?.sourceFilePaths?.length">
+              将使用相同文件直接重新处理，无需重新选择文件。
+            </template>
+            <template v-else>
+              将打开文件选择器，选择文件后开始新的处理任务。
+            </template>
           </p>
+          <div v-if="store.selectedTask" class="bg-muted/50 rounded-lg px-3 py-2">
+            <span class="text-xs text-muted">当前文件：</span>
+            <span class="text-xs font-medium text-highlighted">{{ getTaskTitle(store.selectedTask) }}</span>
+          </div>
           <div class="bg-muted rounded-lg p-3">
-            <p class="text-sm text-muted mb-2">选择重新开始方式：</p>
+            <p class="text-sm text-muted mb-2">已导入记录的处理方式：</p>
             <div class="space-y-2">
               <label class="flex items-start gap-2 cursor-pointer">
                 <input
@@ -396,7 +379,7 @@
                 />
                 <div>
                   <span class="text-sm font-medium">保留已导入记录</span>
-                  <p class="text-xs text-muted">重新处理文件，保留已成功导入的数据</p>
+                  <p class="text-xs text-muted">保留此文件已成功导入的数据，新任务与之并存</p>
                 </div>
               </label>
               <label class="flex items-start gap-2 cursor-pointer">
@@ -407,8 +390,8 @@
                   class="mt-1"
                 />
                 <div>
-                  <span class="text-sm font-medium text-error">删除已导入记录</span>
-                  <p class="text-xs text-muted">删除此批次已导入的所有记录，然后重新处理</p>
+                  <span class="text-sm font-medium text-error">先删除已导入记录</span>
+                  <p class="text-xs text-muted">撤回此文件导入的所有记录，然后重新选择文件导入</p>
                 </div>
               </label>
             </div>
@@ -425,7 +408,7 @@
             :loading="resetting"
             @click="executeReset"
           >
-            {{ resetWithDelete ? '删除并重新开始' : '重新开始' }}
+            {{ resetWithDelete ? '删除并重新导入' : '重新导入' }}
           </UButton>
         </div>
       </template>
@@ -438,6 +421,7 @@ import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { open } from '@tauri-apps/plugin-dialog'
 import { useProcessingStore } from '~/stores/processing'
+import { batchesApi } from '~/utils/api'
 import type { TaskProgress, TaskPhase, FilePhase, SheetPhase } from '~/types'
 
 const route = useRoute()
@@ -470,6 +454,20 @@ function getTaskTitle(task: TaskProgress): string {
   return `任务 ${task.taskId.slice(0, 8)}`
 }
 
+function formatTime(isoString: string): string {
+  try {
+    const d = new Date(isoString)
+    const mm = String(d.getMonth() + 1).padStart(2, '0')
+    const dd = String(d.getDate()).padStart(2, '0')
+    const hh = String(d.getHours()).padStart(2, '0')
+    const min = String(d.getMinutes()).padStart(2, '0')
+    return `${mm}-${dd} ${hh}:${min}`
+  }
+  catch {
+    return ''
+  }
+}
+
 function getTaskPhaseIcon(phase: TaskPhase): string {
   const icons: Record<TaskPhase, string> = {
     starting: 'i-lucide-clock',
@@ -498,7 +496,7 @@ function getTaskPhaseIconClass(phase: TaskPhase): string {
 
 function getTaskPhaseText(phase: TaskPhase): string {
   const texts: Record<TaskPhase, string> = {
-    starting: '启动中',
+    starting: '等待处理',
     processing: '处理中',
     paused: '已暂停',
     completed: '已完成',
@@ -657,14 +655,22 @@ async function executeReset() {
 
   resetting.value = true
   try {
-    await store.resetTask(store.selectedTask.taskId, resetWithDelete.value)
+    // 如果勾选了删除记录，先通过撤回 API 删除此批次的已导入数据
+    if (resetWithDelete.value && store.selectedTask.batchNumber) {
+      await batchesApi.rollback(projectId.value, store.selectedTask.batchNumber)
+    }
     showResetModal.value = false
-    toast.add({
-      title: resetWithDelete.value ? '已删除记录并重新开始' : '任务已重新开始',
-      color: 'success',
-    })
-    // 重新获取任务列表
-    await store.fetchTasks(projectId.value)
+
+    // 优先复用已记录的完整路径，无需重新弹文件选择器
+    const filePaths = store.selectedTask.sourceFilePaths
+    if (filePaths && filePaths.length > 0) {
+      await store.startProcessing(projectId.value, filePaths)
+      toast.add({ title: `已重新开始处理`, color: 'success' })
+    }
+    else {
+      // 降级：路径未记录（历史任务），打开文件选择器
+      await selectFiles()
+    }
   }
   catch (error: any) {
     toast.add({ title: '重新开始失败', description: error?.message, color: 'error' })
@@ -677,6 +683,7 @@ async function executeReset() {
 function viewResults() {
   const batch = store.selectedTask?.batchNumber
   const basePath = `/project/${projectId.value}/results`
+  // 带批次号跳转，results 页会自动筛选此文件的数据
   router.push(batch ? `${basePath}?batch=${encodeURIComponent(batch)}` : basePath)
 }
 

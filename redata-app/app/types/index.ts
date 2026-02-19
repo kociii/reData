@@ -288,6 +288,7 @@ export interface TaskProgress {
   batchNumber: string | null
   phase: TaskPhase
   sourceFiles: string[]
+  sourceFilePaths?: string[]   // 完整文件路径（仅当前会话内存，用于重新开始复用）
   files: FileProgress[]
   totalRows: number
   processedRows: number
@@ -333,30 +334,15 @@ export interface RollbackResult {
   message: string
 }
 
-// Sheet 导入详情
-export interface SheetImportDetail {
-  sheet_name: string
-  record_count: number
-  status: string
-  can_rollback: boolean
-}
-
-// 文件导入详情
-export interface FileImportDetail {
-  file_name: string
-  sheets: SheetImportDetail[]
-  total_records: number
-  can_rollback: boolean
-}
-
-// 批次详情
+// 导入记录详情（以任务为单位，1任务=1文件）
 export interface BatchDetailResponse {
   batch_number: string
+  task_id: string
+  source_file: string
   project_id: number
   created_at: string
   status: string
   total_records: number
-  files: FileImportDetail[]
 }
 
 // ── 项目分组相关类型 ─────────────────────────────────────────────────
@@ -386,4 +372,84 @@ export interface GroupWithChildren {
   children: GroupWithChildren[]
   created_at: string
   updated_at: string | null
+}
+
+// ── 高级筛选相关类型 ─────────────────────────────────────────────────
+
+// 筛选运算符
+export type FilterOperator =
+  | 'eq'        // 等于
+  | 'neq'       // 不等于
+  | 'contains'  // 包含
+  | 'not_contains' // 不包含
+  | 'starts_with'  // 开头为
+  | 'ends_with'    // 结尾为
+  | 'gt'        // 大于
+  | 'lt'        // 小于
+  | 'gte'       // 大于等于
+  | 'lte'       // 小于等于
+  | 'between'   // 在范围内
+  | 'is_empty'  // 为空
+  | 'is_not_empty' // 不为空
+
+// 筛选条件
+export interface FilterCondition {
+  id: string
+  field: string           // field_id 或 'created_at' 等特殊字段
+  operator: FilterOperator
+  value?: string | number | [string, string]  // 单值或范围值
+}
+
+// 高级筛选请求
+export interface AdvancedFilterRequest {
+  search?: string
+  conditions: FilterCondition[]
+  source_file?: string
+  source_sheet?: string
+  batch_number?: string
+  status?: string
+  conjunction?: 'and' | 'or'
+}
+
+// 来源文件信息
+export interface SourceFileInfo {
+  source_file: string
+  record_count: number
+}
+
+// 运算符显示配置
+export const OPERATOR_LABELS: Record<FilterOperator, string> = {
+  eq: '等于',
+  neq: '不等于',
+  contains: '包含',
+  not_contains: '不包含',
+  starts_with: '开头为',
+  ends_with: '结尾为',
+  gt: '大于',
+  lt: '小于',
+  gte: '大于等于',
+  lte: '小于等于',
+  between: '在范围内',
+  is_empty: '为空',
+  is_not_empty: '不为空',
+}
+
+// 根据字段类型获取可用运算符
+export function getOperatorsForFieldType(fieldType: string): FilterOperator[] {
+  switch (fieldType) {
+    case 'text':
+    case 'company':
+      return ['eq', 'neq', 'contains', 'not_contains', 'starts_with', 'ends_with', 'is_empty', 'is_not_empty']
+    case 'phone':
+      return ['eq', 'neq', 'starts_with', 'ends_with', 'is_empty', 'is_not_empty']
+    case 'email':
+      return ['eq', 'neq', 'contains', 'starts_with', 'is_empty', 'is_not_empty']
+    case 'number':
+    case 'id_card':
+      return ['eq', 'neq', 'gt', 'lt', 'gte', 'lte', 'between', 'is_empty', 'is_not_empty']
+    case 'date':
+      return ['eq', 'gt', 'lt', 'gte', 'lte', 'between', 'is_empty', 'is_not_empty']
+    default:
+      return ['eq', 'neq', 'contains', 'is_empty', 'is_not_empty']
+  }
 }

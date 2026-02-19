@@ -110,7 +110,7 @@ export const useProcessingStore = defineStore('processing', () => {
     taskIds.value.map(id => taskMap.value.get(id)!).filter(Boolean),
   )
   const activeTasks = computed(() =>
-    tasks.value.filter(t => t.phase === 'processing' || t.phase === 'paused'),
+    tasks.value.filter(t => t.phase === 'processing' || t.phase === 'paused' || t.phase === 'starting'),
   )
   const completedTasks = computed(() =>
     tasks.value.filter(t => ['completed', 'cancelled', 'error', 'interrupted'].includes(t.phase)),
@@ -203,9 +203,20 @@ export const useProcessingStore = defineStore('processing', () => {
         if (task.status !== 'pending') {
           const fullFiles = await fetchTaskFullProgress(task.task_id)
           if (fullFiles && fullFiles.length > 0) {
+            // 任务已完成时修正残留 waiting/processing 状态
+            // （task_file_progress 缺少文件级记录时 get_task_full_progress 默认返回 waiting）
+            const isTerminal = ['completed', 'cancelled'].includes(task.status)
+            const correctedFiles = isTerminal
+              ? fullFiles.map(f => ({
+                  ...f,
+                  phase: (f.phase === 'waiting' || f.phase === 'processing')
+                    ? 'done' as FilePhase
+                    : f.phase,
+                }))
+              : fullFiles
             taskProgress = {
               ...taskProgress,
-              files: fullFiles,
+              files: correctedFiles,
             }
           }
         }
@@ -229,43 +240,48 @@ export const useProcessingStore = defineStore('processing', () => {
   async function startProcessing(projectId: number, filePaths: string[]) {
     loading.value = true
     error.value = null
+    const newTaskIds: string[] = []
     try {
-      const task = await processingApi.start({
-        project_id: projectId,
-        file_paths: filePaths,
-      })
+      // 每个文件独立创建一个任务和批次，便于按文件进行撤回/暂停/删除
+      for (const filePath of filePaths) {
+        const task = await processingApi.start({
+          project_id: projectId,
+          file_paths: [filePath],
+        })
 
-      const sourceFileNames = filePaths.map((p) => {
-        const parts = p.split(/[/\\]/)
-        return parts[parts.length - 1] || p
-      })
+        const fileName = filePath.split(/[/\\]/).pop() || filePath
 
-      const taskProgress: TaskProgress = {
-        taskId: task.task_id,
-        projectId: task.project_id,
-        batchNumber: task.batch_number,
-        phase: 'processing',
-        sourceFiles: task.source_files || sourceFileNames,
-        files: (task.source_files || sourceFileNames).map(fileName => ({
-          fileName,
-          phase: 'waiting',
-          sheets: [],
+        const taskProgress: TaskProgress = {
+          taskId: task.task_id,
+          projectId: task.project_id,
+          batchNumber: task.batch_number,
+          phase: 'processing',
+          sourceFiles: task.source_files || [fileName],
+          sourceFilePaths: [filePath],
+          files: (task.source_files || [fileName]).map(name => ({
+            fileName: name,
+            phase: 'waiting',
+            sheets: [],
+            totalRows: 0,
+            successCount: 0,
+            errorCount: 0,
+          })),
           totalRows: 0,
+          processedRows: 0,
           successCount: 0,
           errorCount: 0,
-        })),
-        totalRows: 0,
-        processedRows: 0,
-        successCount: 0,
-        errorCount: 0,
-        startedAt: new Date().toISOString(),
-        completedAt: null,
-      }
+          startedAt: new Date().toISOString(),
+          completedAt: null,
+        }
 
-      setTask(taskProgress)
-      taskIds.value = [task.task_id, ...taskIds.value]
-      selectedTaskId.value = task.task_id
-      return taskProgress
+        setTask(taskProgress)
+        newTaskIds.push(task.task_id)
+      }
+      // 将所有新任务统一插入到列表最前面，选中第一个
+      taskIds.value = [...newTaskIds, ...taskIds.value]
+      if (newTaskIds.length > 0) {
+        selectedTaskId.value = newTaskIds[0]!
+      }
     }
     catch (e: any) {
       error.value = e.message
@@ -571,14 +587,35 @@ export const useProcessingStore = defineStore('processing', () => {
   async function syncTaskStatus(taskId: string) {
     try {
       const task = await processingApi.status(taskId)
+      const newPhase = mapStatusToPhase(task.status)
+      const existingTask = taskMap.value.get(taskId)
+
       updateTask(taskId, existing => ({
         ...existing,
-        phase: mapStatusToPhase(task.status),
+        phase: newPhase,
         totalRows: task.total_rows,
         processedRows: task.processed_rows,
         successCount: task.success_count,
         errorCount: task.error_count,
       }))
+
+      // 当任务通过轮询进入终止状态时，同步文件进度
+      // 防止 completed 事件丢失导致文件仍显示"等待中"
+      const terminalPhases = ['completed', 'cancelled', 'error', 'interrupted']
+      const wasActive = existingTask && !terminalPhases.includes(existingTask.phase)
+      if (wasActive && terminalPhases.includes(newPhase)) {
+        const fullFiles = await fetchTaskFullProgress(taskId)
+        if (fullFiles && fullFiles.length > 0) {
+          updateTask(taskId, t => ({ ...t, files: fullFiles }))
+        }
+        else if (newPhase === 'completed') {
+          // 兜底：DB 记录缺失时将所有文件标记为完成
+          updateTask(taskId, t => ({
+            ...t,
+            files: t.files.map(f => ({ ...f, phase: 'done' as FilePhase })),
+          }))
+        }
+      }
     }
     catch {
       // 静默失败，不影响主流程
