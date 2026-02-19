@@ -322,3 +322,38 @@ export interface FullTaskProgressResponse {
   task_id: string
   files: FileProgressResponse[]
 }
+
+// ── 导入撤回相关类型 ─────────────────────────────────────────────────
+
+// 撤回结果
+export interface RollbackResult {
+  success: boolean
+  deleted_count: number
+  message: string
+}
+
+// Sheet 导入详情
+export interface SheetImportDetail {
+  sheet_name: string
+  record_count: number
+  status: string
+  can_rollback: boolean
+}
+
+// 文件导入详情
+export interface FileImportDetail {
+  file_name: string
+  sheets: SheetImportDetail[]
+  total_records: number
+  can_rollback: boolean
+}
+
+// 批次详情
+export interface BatchDetailResponse {
+  batch_number: string
+  project_id: number
+  created_at: string
+  status: string
+  total_records: number
+  files: FileImportDetail[]
+}

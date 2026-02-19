@@ -239,6 +239,12 @@ pub fn run() {
             commands::get_batches,
             commands::get_task_full_progress,
             commands::reset_processing_task,
+            // 导入撤回 Commands
+            commands::rollback_batch,
+            commands::rollback_file,
+            commands::rollback_sheet,
+            commands::get_batch_details,
+            commands::get_project_batches_with_stats,
             // 处理 Commands
             commands::start_processing,
             commands::pause_processing_task,

@@ -23,6 +23,8 @@ import type {
   ListTasksResponse,
   ProcessingProgress,
   FullTaskProgressResponse,
+  RollbackResult,
+  BatchDetailResponse,
 } from '~/types'
 
 // 使用 Tauri Commands 模式（零网络开销）
@@ -469,6 +471,31 @@ export const batchesApi = {
       method: 'POST',
       body: JSON.stringify({ project_id: projectId, batch_number: batchNumber, file_count: fileCount }),
     })
+  },
+
+  // 获取项目所有批次（带详情统计）
+  listWithStats: async (projectId: number): Promise<BatchDetailResponse[]> => {
+    return await invoke<BatchDetailResponse[]>('get_project_batches_with_stats', { projectId })
+  },
+
+  // 获取批次详情
+  getDetails: async (projectId: number, batchNumber: string): Promise<BatchDetailResponse> => {
+    return await invoke<BatchDetailResponse>('get_batch_details', { projectId, batchNumber })
+  },
+
+  // 撤回整个批次
+  rollback: async (projectId: number, batchNumber: string): Promise<RollbackResult> => {
+    return await invoke<RollbackResult>('rollback_batch', { projectId, batchNumber })
+  },
+
+  // 撤回单个文件
+  rollbackFile: async (projectId: number, batchNumber: string, fileName: string): Promise<RollbackResult> => {
+    return await invoke<RollbackResult>('rollback_file', { projectId, batchNumber, fileName })
+  },
+
+  // 撤回单个 Sheet
+  rollbackSheet: async (projectId: number, batchNumber: string, fileName: string, sheetName: string): Promise<RollbackResult> => {
+    return await invoke<RollbackResult>('rollback_sheet', { projectId, batchNumber, fileName, sheetName })
   },
 }
 
