@@ -33,6 +33,12 @@ pub async fn run_migrations(db: &DatabaseConnection) -> Result<(), DbErr> {
     // v0.1.2 迁移：创建任务文件进度表
     create_task_file_progress_table(db).await?;
 
+    // v0.1.2 迁移：创建项目分组表
+    create_project_groups_table(db).await?;
+
+    // v0.1.2 迁移：为项目表添加 group_id 字段
+    add_group_id_to_projects(db).await?;
+
     tracing::info!("Database migrations completed");
 
     Ok(())
@@ -327,5 +333,74 @@ async fn create_task_file_progress_table(db: &DatabaseConnection) -> Result<(), 
     .await?;
 
     tracing::info!("Created task_file_progress table");
+    Ok(())
+}
+
+/// v0.1.2 迁移：创建项目分组表
+async fn create_project_groups_table(db: &DatabaseConnection) -> Result<(), DbErr> {
+    let sql = r#"
+        CREATE TABLE IF NOT EXISTS project_groups (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,
+            parent_id INTEGER,
+            color TEXT,
+            icon TEXT,
+            sort_order INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL,
+            updated_at TEXT,
+            FOREIGN KEY (parent_id) REFERENCES project_groups(id) ON DELETE SET NULL
+        )
+    "#;
+
+    db.execute(Statement::from_string(
+        db.get_database_backend(),
+        sql.to_string(),
+    ))
+    .await?;
+
+    // 创建索引
+    db.execute(Statement::from_string(
+        db.get_database_backend(),
+        "CREATE INDEX IF NOT EXISTS idx_project_groups_parent ON project_groups(parent_id)".to_string(),
+    ))
+    .await?;
+
+    db.execute(Statement::from_string(
+        db.get_database_backend(),
+        "CREATE INDEX IF NOT EXISTS idx_project_groups_sort ON project_groups(sort_order)".to_string(),
+    ))
+    .await?;
+
+    tracing::info!("Created project_groups table");
+    Ok(())
+}
+
+/// v0.1.2 迁移：为项目表添加 group_id 字段
+async fn add_group_id_to_projects(db: &DatabaseConnection) -> Result<(), DbErr> {
+    // 检查列是否已存在
+    let result = db
+        .query_one(Statement::from_string(
+            db.get_database_backend(),
+            "SELECT name FROM pragma_table_info('projects') WHERE name = 'group_id'".to_string(),
+        ))
+        .await?;
+
+    if result.is_none() {
+        db.execute(Statement::from_string(
+            db.get_database_backend(),
+            "ALTER TABLE projects ADD COLUMN group_id INTEGER REFERENCES project_groups(id) ON DELETE SET NULL".to_string(),
+        ))
+        .await?;
+
+        // 创建索引
+        db.execute(Statement::from_string(
+            db.get_database_backend(),
+            "CREATE INDEX IF NOT EXISTS idx_projects_group ON projects(group_id)".to_string(),
+        ))
+        .await?;
+
+        tracing::info!("Added group_id column to projects table");
+    }
+
     Ok(())
 }

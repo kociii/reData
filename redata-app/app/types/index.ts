@@ -12,6 +12,7 @@ export interface Project {
   id: number
   name: string
   description: string | null
+  group_id: number | null
   created_at: string
   updated_at: string | null
 }
@@ -356,4 +357,33 @@ export interface BatchDetailResponse {
   status: string
   total_records: number
   files: FileImportDetail[]
+}
+
+// ── 项目分组相关类型 ─────────────────────────────────────────────────
+
+// 项目分组响应
+export interface ProjectGroupResponse {
+  id: number
+  name: string
+  parent_id: number | null
+  color: string | null
+  icon: string | null
+  sort_order: number
+  project_count: number
+  created_at: string
+  updated_at: string | null
+}
+
+// 带子分组的分组
+export interface GroupWithChildren {
+  id: number
+  name: string
+  parent_id: number | null
+  color: string | null
+  icon: string | null
+  sort_order: number
+  project_count: number
+  children: GroupWithChildren[]
+  created_at: string
+  updated_at: string | null
 }

@@ -23,13 +23,29 @@ pub struct Model {
     #[sea_orm(default_value = "skip")]
     pub dedup_strategy: String, // skip, update, merge
 
+    /// 所属分组 ID
+    pub group_id: Option<i32>,
+
     pub created_at: DateTimeUtc,
 
     pub updated_at: Option<DateTimeUtc>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
-pub enum Relation {}
+pub enum Relation {
+    #[sea_orm(
+        belongs_to = "super::project_group::Entity",
+        from = "Column::GroupId",
+        to = "super::project_group::Column::Id"
+    )]
+    Group,
+}
+
+impl Related<super::project_group::Entity> for Entity {
+    fn to() -> RelationDef {
+        Relation::Group.def()
+    }
+}
 
 impl ActiveModelBehavior for ActiveModel {}
 

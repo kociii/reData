@@ -197,6 +197,15 @@ pub fn run() {
             commands::get_project,
             commands::update_project,
             commands::delete_project,
+            // 项目分组 Commands
+            commands::get_project_groups,
+            commands::get_project_groups_flat,
+            commands::create_project_group,
+            commands::update_project_group,
+            commands::delete_project_group,
+            commands::move_project_to_group,
+            commands::batch_move_projects,
+            commands::reorder_project_groups,
             // 字段管理 Commands
             commands::get_fields,
             commands::get_all_fields,

@@ -25,6 +25,8 @@ import type {
   FullTaskProgressResponse,
   RollbackResult,
   BatchDetailResponse,
+  ProjectGroupResponse,
+  GroupWithChildren,
 } from '~/types'
 
 // 使用 Tauri Commands 模式（零网络开销）
@@ -106,6 +108,72 @@ export const projectsApi = {
     return request<void>(`/projects/${id}`, {
       method: 'DELETE',
     })
+  },
+
+  // 移动项目到分组
+  moveToGroup: async (projectId: number, groupId: number | null) => {
+    return await invoke<void>('move_project_to_group', { projectId, groupId })
+  },
+}
+
+// ============ 项目分组 API ============
+
+export const projectGroupsApi = {
+  // 获取所有分组（树形结构）
+  list: async (): Promise<GroupWithChildren[]> => {
+    return await invoke<GroupWithChildren[]>('get_project_groups')
+  },
+
+  // 获取所有分组（扁平列表）
+  listFlat: async (): Promise<ProjectGroupResponse[]> => {
+    return await invoke<ProjectGroupResponse[]>('get_project_groups_flat')
+  },
+
+  // 创建分组
+  create: async (data: {
+    name: string
+    parentId?: number | null
+    color?: string | null
+    icon?: string | null
+  }): Promise<ProjectGroupResponse> => {
+    return await invoke<ProjectGroupResponse>('create_project_group', {
+      name: data.name,
+      parentId: data.parentId ?? null,
+      color: data.color ?? null,
+      icon: data.icon ?? null,
+    })
+  },
+
+  // 更新分组
+  update: async (groupId: number, data: {
+    name?: string
+    color?: string | null
+    icon?: string | null
+    sortOrder?: number
+  }): Promise<ProjectGroupResponse> => {
+    return await invoke<ProjectGroupResponse>('update_project_group', {
+      groupId,
+      name: data.name ?? null,
+      color: data.color ?? null,
+      icon: data.icon ?? null,
+      sortOrder: data.sortOrder ?? null,
+    })
+  },
+
+  // 删除分组
+  delete: async (groupId: number) => {
+    await invoke<void>('delete_project_group', { groupId })
+  },
+
+  // 批量移动项目
+  batchMoveProjects: async (projectIds: number[], groupId: number | null) => {
+    return await invoke<number>('batch_move_projects', { projectIds, groupId })
+  },
+
+  // 更新分组排序
+  reorder: async (groupOrders: Array<{ id: number; sortOrder: number }>) => {
+    const orders = groupOrders.map(g => [g.id, g.sortOrder] as [number, number])
+    await invoke<void>('reorder_project_groups', { groupOrders: orders })
   },
 }
 

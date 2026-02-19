@@ -4,6 +4,7 @@
 // 使用 Tauri Commands 模式，零网络开销，直接函数调用
 
 pub mod projects;
+pub mod project_groups;
 pub mod fields;
 pub mod ai_configs;
 pub mod ai_service;
@@ -16,6 +17,7 @@ pub mod statistics;
 
 // 重新导出所有 commands，方便在 lib.rs 中注册
 pub use projects::*;
+pub use project_groups::*;
 pub use fields::*;
 pub use ai_configs::*;
 pub use ai_service::*;
